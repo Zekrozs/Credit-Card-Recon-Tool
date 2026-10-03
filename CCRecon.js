@@ -1,36 +1,40 @@
 "use strict";
 
-function getExcelData(file) {
-  (async () => {
-    let response;
-    try {
-      response = await fetch(file);
-    } catch (e) {
-      throw new Error(`network error: ${e.message}`);
-    }
+class workbook {
+ #data
+  constructor(data){
+  this.#data = data;
+  }
 
-    if (response.status != 200) {
-      throw new Error(`something went wrong. status: ${response.status}`);
-    }
+static async create(file){
+      let response;
+      try {
+        response = await fetch(file);
+      } catch (e) {
+        throw new Error(`network error: ${e.message}`);
+      }
 
-    let AB;
-    try {
-      AB = await response.arrayBuffer();
-    } catch (e) {
-      throw new Error(`Memory error: ${e.message}`);
-    }
+      if (response.status != 200) {
+        throw new Error(`something went wrong. status: ${response.status}`);
+      }
 
-    const rawFile = await XLSX.read(AB)
-    console.log(rawFile)
-    return rawFile
-    
-  })();
-}
+      let AB;
+      try {
+        AB = await response.arrayBuffer();
+      } catch (e) {
+        throw new Error(`Memory error: ${e.message}`);
+      }
 
-// async function logWorkbook(file){
+      const data = await XLSX.read(AB);
 
-// console.log (await getExcelData(file))
+      return new workbook(data)
+    };
+  }
 
-// }
-const journal = getExcelData("./excel/Journal.xlsx");
-const merchant = getExcelData("./excel/Merchant September.xlsx");
+
+
+
+
+
+
+
