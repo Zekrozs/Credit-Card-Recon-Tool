@@ -6,7 +6,7 @@ class workbook {
   constructor(data) {
     this.#data = data;
   }
-
+  // file is added by user
   static async create(file) {
     let response;
     try {
@@ -39,47 +39,66 @@ class workbook {
   }
 
   static performRecon(journal, merchant) {
-    const paymentDateExcel = "46269";
+    const paymentDateExcel = "46269"; //added by user
     const excelPaymentDate = merchant.#sheet.filter(
       (requestedDay) =>
         requestedDay["Posting Date DD:MM:YYYY"] == paymentDateExcel,
     );
 
     // need to create an object to oranize the data when refractoring
-    const manualPayments = excelPaymentDate.filter(
-      (transaction) => transaction["Channel"] !== "ECOM",
-    ).filter(card => card['Card Type']?.toUpperCase().includes('VISA'));
-    const ECOMPayments = excelPaymentDate.filter(
-      (transaction) => transaction["Channel"]?.toUpperCase() === "ECOM",
-    ).filter(card => card['Card Type']?.toUpperCase().includes('VISA'));
+    const POSPayments = excelPaymentDate
+      .filter((transaction) => transaction["Channel"]?.toUpperCase() !== "ECOM")
+      .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); // added by user
+    const ECOMPayments = excelPaymentDate
+      .filter((transaction) => transaction["Channel"]?.toUpperCase() === "ECOM")
+      .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); //added by user
 
     const dayToMs = 24 * 60 * 60 * 1000;
     const parsedPaymentDate = (+paymentDateExcel - 25569) * dayToMs;
     const manualDate = new Date(parsedPaymentDate - 3 * dayToMs);
     const MicrosDate = new Date(parsedPaymentDate - 1 * dayToMs);
-    (() => {
-      manualDate.setHours(0, 0, 0, 0);
-      MicrosDate.setHours(0, 0, 0, 0);
-    })();
-    const journalDates = {
-      Manual: journal.#sheet.filter(
+    manualDate.setHours(0, 0, 0, 0);
+    MicrosDate.setHours(0, 0, 0, 0);
+    const Manual = journal.#sheet
+      .filter(
         (manualPosting) =>
           new Date(manualPosting["BUSINESS_DATE"]).toDateString() ==
           manualDate.toDateString(),
-      ),
-      Micros: journal.#sheet.filter(
+      )
+      .filter((transaction) =>
+        transaction["TRX_DESC"]?.toUpperCase().includes("MANUAL"),
+      );
+
+    const Micros = journal.#sheet
+      .filter(
         (POSPosting) =>
           new Date(POSPosting["BUSINESS_DATE"]).toDateString() ==
           MicrosDate.toDateString(),
-      ),
-    };
+      )
+      .filter((transaction) =>
+        transaction["TRX_DESC"]?.toUpperCase().includes("POS"),
+      );
+    const journalTransactions = [...Manual, ...Micros];
+
+    const matchingTransactions = POSPayments.filter((payment) => {
+      return journalTransactions.some((revenue) => {
+       return +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"];
+      });
+    });
+    const unmatchingTransactions = POSPayments.filter((payment) => {
+      return !journalTransactions.some((revenue) => {
+       return +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"];
+      });
+    });
 
     console.log(new Date(parsedPaymentDate));
     console.log(manualDate);
     console.log(MicrosDate);
-    console.log(journalDates);
-    console.log(manualPayments);
+    console.log(journalTransactions);
+    console.log(POSPayments);
     console.log(ECOMPayments);
+    console.log(matchingTransactions);
+    console.log(unmatchingTransactions)
   }
 }
 
