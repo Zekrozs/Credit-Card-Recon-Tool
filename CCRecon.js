@@ -67,7 +67,10 @@ class workbook {
       )
       .filter((transaction) =>
         transaction["TRX_DESC"]?.toUpperCase().includes("MANUAL"),
-      );
+      )
+      .filter((type) => !(type['REMARK']?.toUpperCase().includes('LINK') ||
+      type['CREDIT_CARD_SUPPLEMENT']?.toUpperCase().includes('LINK') || 
+      type['REFERENCE']?.toUpperCase().includes('LINK')))
 
     const Micros = journal.#sheet
       .filter(
@@ -82,23 +85,31 @@ class workbook {
 
     const matchingTransactions = POSPayments.filter((payment) => {
       return journalTransactions.some((revenue) => {
-       return +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"];
+        return (
+          +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"]
+        );
       });
     });
-    const unmatchingTransactions = POSPayments.filter((payment) => {
+    const unmatchingJournal = journalTransactions.filter(transaction=>{
+      return !POSPayments.some(payment => {
+        return +payment["Transaction Amount"] === +transaction["PRINT_CASHIER_CREDIT"]
+      })
+    });
+    const unmatchingPayments = POSPayments.filter((payment) => {
       return !journalTransactions.some((revenue) => {
-       return +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"];
+        return +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"];
       });
     });
-
-    console.log(new Date(parsedPaymentDate));
-    console.log(manualDate);
-    console.log(MicrosDate);
-    console.log(journalTransactions);
-    console.log(POSPayments);
-    console.log(ECOMPayments);
+    unmatchingJournal.forEach(entry => console.log(entry.PRINT_CASHIER_CREDIT))
+    // console.log(new Date(parsedPaymentDate));
+    // console.log(manualDate);
+    // console.log(MicrosDate);
+    // console.log(journalTransactions);
+    // console.log(POSPayments);
+    // console.log(ECOMPayments);
     console.log(matchingTransactions);
-    console.log(unmatchingTransactions)
+    console.log(unmatchingPayments);
+    console.log(unmatchingJournal);
   }
 }
 
@@ -115,3 +126,9 @@ call();
 // the files
 // the payment date
 // payment method
+
+// allocate any corrections
+// make sure that all transaction are reconciled
+// get the matching transactions withot dupliaction
+// get unmatching Journal transactions
+// get unmatching merchant transactions
