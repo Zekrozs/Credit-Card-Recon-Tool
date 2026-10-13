@@ -33,7 +33,7 @@ class workbook {
   async getReconSheet() {
     const workSheet = this.#data.Sheets[this.#data.SheetNames[0]];
     this.#sheet = XLSX.utils.sheet_to_json(workSheet);
-    console.log(this.#sheet);
+    // console.log(this.#sheet);
 
     // console.log(selectedDay);
   }
@@ -68,9 +68,14 @@ class workbook {
       .filter((transaction) =>
         transaction["TRX_DESC"]?.toUpperCase().includes("MANUAL"),
       )
-      .filter((type) => !(type['REMARK']?.toUpperCase().includes('LINK') ||
-      type['CREDIT_CARD_SUPPLEMENT']?.toUpperCase().includes('LINK') || 
-      type['REFERENCE']?.toUpperCase().includes('LINK')))
+      .filter(
+        (type) =>
+          !(
+            type["REMARK"]?.toUpperCase().includes("LINK") ||
+            type["CREDIT_CARD_SUPPLEMENT"]?.toUpperCase().includes("LINK") ||
+            type["REFERENCE"]?.toUpperCase().includes("LINK")
+          ),
+      );
 
     const Micros = journal.#sheet
       .filter(
@@ -83,24 +88,34 @@ class workbook {
       );
     const journalTransactions = [...Manual, ...Micros];
 
-    const matchingTransactions = POSPayments.filter((payment) => {
-      return journalTransactions.some((revenue) => {
-        return (
+    const usedJournalTransactions = new Set();
+    const matchingTransactions = [];
+    const unmatchingPayments = [];
+
+    POSPayments.forEach((payment) => {
+      const revenueIndex = journalTransactions.findIndex(
+        (revenue, index) => 
+          !usedJournalTransactions.has(index) && 
           +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"]
-        );
-      });
+        
+      );
+      
+      if(revenueIndex === -1){
+        unmatchingPayments.push(payment)
+      } else{
+        usedJournalTransactions.add(revenueIndex)
+        matchingTransactions.push({
+          payment,
+          revenue: journalTransactions[revenueIndex]
+        })
+      }
+
     });
-    const unmatchingJournal = journalTransactions.filter(transaction=>{
-      return !POSPayments.some(payment => {
-        return +payment["Transaction Amount"] === +transaction["PRINT_CASHIER_CREDIT"]
-      })
-    });
-    const unmatchingPayments = POSPayments.filter((payment) => {
-      return !journalTransactions.some((revenue) => {
-        return +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"];
-      });
-    });
-    unmatchingJournal.forEach(entry => console.log(entry.PRINT_CASHIER_CREDIT))
+    const unmatchingJournal = journalTransactions.filter((_,index)=>
+      !usedJournalTransactions.has(index)
+    )
+
+    // unmatchingJournal.forEach(entry => console.log(entry.PRINT_CASHIER_CREDIT))
     // console.log(new Date(parsedPaymentDate));
     // console.log(manualDate);
     // console.log(MicrosDate);
@@ -110,6 +125,7 @@ class workbook {
     console.log(matchingTransactions);
     console.log(unmatchingPayments);
     console.log(unmatchingJournal);
+    console.log(usedJournalTransactions);
   }
 }
 
