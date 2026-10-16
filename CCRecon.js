@@ -27,34 +27,42 @@ class workbook {
     }
 
     const data = await XLSX.read(AB);
+    if (!data) {
+      throw new Error("something went wrong, could not read workbook data");
+    }
 
     return new workbook(data);
   }
   async getReconSheet() {
-    const workSheet = this.#data.Sheets[this.#data.SheetNames[0]];
-    this.#sheet = XLSX.utils.sheet_to_json(workSheet);
-    // console.log(this.#sheet);
-
-    // console.log(selectedDay);
+    if (!this.#data) {
+      throw new Error(`something went wrong`);
+    }
+    const workSheet = this.#data?.Sheets[this.#data.SheetNames[0]];
+    this.#sheet = await XLSX.utils.sheet_to_json(workSheet);
   }
 
-  static performRecon(journal, merchant) {
-    const paymentDateExcel = "46269"; //added by user
-    const excelPaymentDate = merchant.#sheet.filter(
+  static getTransactions(journal, merchant, excelPaymentDate) {
+    if (!journal.#sheet) {
+      throw new Error(`recon sheet is unavaliable`);
+    }
+    const selectedPaymentDate = merchant.#sheet.filter(
       (requestedDay) =>
-        requestedDay["Posting Date DD:MM:YYYY"] == paymentDateExcel,
+        requestedDay["Posting Date DD:MM:YYYY"] == excelPaymentDate,
     );
-
+    if (!selectedPaymentDate) {
+      throw new Error(`could not get date: ${selectedPaymentDate}`);
+    }
     // need to create an object to oranize the data when refractoring
-    const POSPayments = excelPaymentDate
+    const POSPayments = selectedPaymentDate
       .filter((transaction) => transaction["Channel"]?.toUpperCase() !== "ECOM")
       .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); // added by user
-    const ECOMPayments = excelPaymentDate
+    const ECOMPayments = selectedPaymentDate
       .filter((transaction) => transaction["Channel"]?.toUpperCase() === "ECOM")
       .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); //added by user
 
     const dayToMs = 24 * 60 * 60 * 1000;
-    const parsedPaymentDate = (+paymentDateExcel - 25569) * dayToMs;
+    const parsedPaymentDate = (+excelPaymentDate - 25569) * dayToMs;
+    if (!parsedPaymentDate) return;
     const manualDate = new Date(parsedPaymentDate - 3 * dayToMs);
     const MicrosDate = new Date(parsedPaymentDate - 1 * dayToMs);
     manualDate.setHours(0, 0, 0, 0);
@@ -62,8 +70,8 @@ class workbook {
     const Manual = journal.#sheet
       .filter(
         (manualPosting) =>
-          new Date(manualPosting["BUSINESS_DATE"]).toDateString() ==
-          manualDate.toDateString(),
+          new Date(manualPosting["BUSINESS_DATE"])?.toDateString() ==
+          manualDate?.toDateString(),
       )
       .filter((transaction) =>
         transaction["TRX_DESC"]?.toUpperCase().includes("MANUAL"),
@@ -80,52 +88,55 @@ class workbook {
     const Micros = journal.#sheet
       .filter(
         (POSPosting) =>
-          new Date(POSPosting["BUSINESS_DATE"]).toDateString() ==
-          MicrosDate.toDateString(),
+          new Date(POSPosting["BUSINESS_DATE"])?.toDateString() ==
+          MicrosDate?.toDateString(),
       )
       .filter((transaction) =>
         transaction["TRX_DESC"]?.toUpperCase().includes("POS"),
       );
-    const journalTransactions = [...Manual, ...Micros];
-
-    const usedJournalTransactions = new Set();
-    const matchingTransactions = [];
-    const unmatchingPayments = [];
-
-    POSPayments.forEach((payment) => {
-      const revenueIndex = journalTransactions.findIndex(
-        (revenue, index) => 
-          !usedJournalTransactions.has(index) && 
-          +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"]
-        
-      );
-      
-      if(revenueIndex === -1){
-        unmatchingPayments.push(payment)
-      } else{
-        usedJournalTransactions.add(revenueIndex)
-        matchingTransactions.push({
-          payment,
-          revenue: journalTransactions[revenueIndex]
-        })
+      const previousDays = {
+        previousPayments: [],
+        previousPostings: [],
       }
 
-    });
-    const unmatchingJournal = journalTransactions.filter((_,index)=>
-      !usedJournalTransactions.has(index)
-    )
+    return { Manual, Micros, POSPayments };
+  }
 
-    // unmatchingJournal.forEach(entry => console.log(entry.PRINT_CASHIER_CREDIT))
-    // console.log(new Date(parsedPaymentDate));
-    // console.log(manualDate);
-    // console.log(MicrosDate);
-    // console.log(journalTransactions);
-    // console.log(POSPayments);
-    // console.log(ECOMPayments);
-    console.log(matchingTransactions);
-    console.log(unmatchingPayments);
-    console.log(unmatchingJournal);
-    console.log(usedJournalTransactions);
+  static performRecon(journal, merchant,) {
+    const reconData = workbook.getTransactions(journal, merchant, 46269);
+    if (!reconData) {
+      throw new Error(`couldnt get Recon data`);
+    }
+    const journalTransactions = [...reconData.Manual, ...reconData.Micros];
+    const result = {
+      usedJournalTransactions: new Set(),
+      matchingTransactions: [],
+      unmatchingPayments: [],
+    };
+    reconData.POSPayments.forEach((payment) => {
+      const revenueIndex = journalTransactions.findIndex(
+        (revenue, index) =>
+          !result.usedJournalTransactions.has(index) &&
+          +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"],
+      );
+
+      if (revenueIndex === -1) {
+        result.unmatchingPayments.push(payment);
+      } else {
+        result.usedJournalTransactions.add(revenueIndex);
+        result.matchingTransactions.push({
+          payment,
+          revenue: journalTransactions[revenueIndex],
+        });
+      }
+    });
+    result.unmatchingJournal = journalTransactions.filter(
+      (_, index) => !result.usedJournalTransactions.has(index),
+    );
+
+    console.log(result);
+
+    
   }
 }
 
@@ -144,7 +155,5 @@ call();
 // payment method
 
 // allocate any corrections
-// make sure that all transaction are reconciled
-// get the matching transactions withot dupliaction
-// get unmatching Journal transactions
-// get unmatching merchant transactions
+// i need to carry over unreconciled transactions
+  //could be done by inheritance 
