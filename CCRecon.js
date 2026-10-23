@@ -226,6 +226,7 @@ class workbook {
 
     allJournalTransactions.forEach((_, index) => {
       for (let i = index + 1; i < allJournalTransactions.length; i++) {
+        if(correctionIndex.has(index) || correctionIndex.has(i)) break
         const valueOne =
           allJournalTransactions[index][["PRINT_CASHIER_CREDIT"]];
         const valueTwo = allJournalTransactions[i][["PRINT_CASHIER_CREDIT"]];
@@ -233,6 +234,7 @@ class workbook {
         if (+valueOne + +valueTwo === 0) {
           correctionIndex.add(index);
           correctionIndex.add(i);
+          break;
         }
       }
     });
@@ -271,8 +273,9 @@ class workbook {
     result.unmatchingJournal = reconJournal.filter(
       (_, index) => !result.usedJournalTransactions.has(index),
     );
-
-    // console.log(result);
+    this.previousDays.previousPayments = [...result.unmatchingPayments]
+    this.previousDays.previousPostings = [...result.unmatchingJournal]
+    console.log(result);
     // this.previousDays.previousPostings = [...result.unmatchingJournal];
     // this.previousDays.previousPayments = [...result.unmatchingPayments];
     // console.log(this.previousDays);
@@ -285,6 +288,7 @@ async function call() {
   const Merchant = await workbook.create("./excel/Merchant September.xlsx");
   await Journal.getReconSheet();
   await Merchant.getReconSheet();
+
 
   workbook.performRecon(Journal, Merchant, 46269);
   workbook.performRecon(Journal, Merchant, 46270);
