@@ -162,11 +162,20 @@ class workbook {
     }
 
     const POSPayments = selectedPaymentDate
-      .filter((transaction) => transaction["Channel"]?.toUpperCase() !== "ECOM")
+      .filter((transaction) => transaction["Channel"]?.toUpperCase() === "POS")
       .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); // added by user
     const ECOMPayments = selectedPaymentDate
       .filter((transaction) => transaction["Channel"]?.toUpperCase() === "ECOM")
       .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); //added by user
+
+    const ECOMRefunds = selectedPaymentDate.filter(
+      (debitAmount) =>
+        debitAmount["Transaction Type"]?.toUpperCase().includes("CREDIT") &&
+        debitAmount["Channel"]?.toUpperCase() === "ECOM" &&
+        debitAmount["Card Type"]?.toUpperCase().includes("VISA"),
+    );
+
+    POSPayments.push(...ECOMRefunds);
 
     const dayToMs = 24 * 60 * 60 * 1000;
     const parsedPaymentDate = (+paymentDate - 25569) * dayToMs;
@@ -224,9 +233,10 @@ class workbook {
 
     const correctionIndex = new Set();
 
-    allJournalTransactions.forEach((_, index) => {
+    allJournalTransactions.forEach((transaction, index) => {
       for (let i = index + 1; i < allJournalTransactions.length; i++) {
-        if(correctionIndex.has(index) || correctionIndex.has(i)) break
+        if (correctionIndex.has(index) || correctionIndex.has(i)) break;
+        if (transaction["REFERENCE"]?.toUpperCase().includes("REFUND")) break;
         const valueOne =
           allJournalTransactions[index][["PRINT_CASHIER_CREDIT"]];
         const valueTwo = allJournalTransactions[i][["PRINT_CASHIER_CREDIT"]];
@@ -247,12 +257,12 @@ class workbook {
       ...journalAfterCorrections,
       ...this.previousDays.previousPostings,
     ];
-     console.log({
-      allJournalCount: allJournalTransactions.length,
-      removedAsCorrections: correctionIndex.size,
-      journalAfterCorrectionsCount: journalAfterCorrections.length,
-      reconJournalCount: reconJournal.length,
-    });
+    // console.log({
+    //   allJournalCount: allJournalTransactions.length,
+    //   removedAsCorrections: correctionIndex.size,
+    //   journalAfterCorrectionsCount: journalAfterCorrections.length,
+    //   reconJournalCount: reconJournal.length,
+    // });
     allPayments.forEach((payment) => {
       const revenueIndex = reconJournal.findIndex(
         (revenue, index) =>
@@ -273,13 +283,27 @@ class workbook {
     result.unmatchingJournal = reconJournal.filter(
       (_, index) => !result.usedJournalTransactions.has(index),
     );
-    this.previousDays.previousPayments = [...result.unmatchingPayments]
-    this.previousDays.previousPostings = [...result.unmatchingJournal]
+    this.previousDays.previousPayments = [...result.unmatchingPayments];
+    this.previousDays.previousPostings = [...result.unmatchingJournal];
     console.log(result);
-    // this.previousDays.previousPostings = [...result.unmatchingJournal];
+    // this.previousDays.previo`usPostings = [...result.unmatchingJournal];
     // this.previousDays.previousPayments = [...result.unmatchingPayments];
     // console.log(this.previousDays);
     // this.previousDays.previousPayments.forEach(payment => console.log(payment["Transaction Amount"]))
+  }
+
+  static removeTransaction(name, roomNumber, amount) {
+    const unmatched = this.previousDays.previousPostings;
+    unmatched.splice(
+      unmatched.findIndex(
+        (transactionToRemove) =>
+          transactionToRemove["GUEST_FULL_NAME"] === name &&
+          transactionToRemove[roomNumber] === roomNumber
+          && transactionToRemove['PRINT_CASHIER_CREDIT'] === amount,
+          
+      ),
+      1,
+    );
   }
 }
 
@@ -289,10 +313,18 @@ async function call() {
   await Journal.getReconSheet();
   await Merchant.getReconSheet();
 
-
   workbook.performRecon(Journal, Merchant, 46269);
   workbook.performRecon(Journal, Merchant, 46270);
-  // workbook.performRecon(Journal, Merchant, 46271);
+  workbook.performRecon(Journal, Merchant, 46271);
+  workbook.performRecon(Journal, Merchant, 46272);
+  workbook.performRecon(Journal, Merchant, 46273);
+  workbook.performRecon(Journal, Merchant, 46274);
+  workbook.performRecon(Journal, Merchant, 46275);
+  workbook.performRecon(Journal, Merchant, 46276);
+  // workbook.removeTransaction("Algholeeqa,Abdulaziz,MR", "T30213","-4479.52");
+  workbook.removeTransaction("Alasqah,Sumayyah,MRS", "T30213","-4479.52");
+  // workbook.performRecon(Journal, Merchant, 46277);
+  
 }
 call();
 
