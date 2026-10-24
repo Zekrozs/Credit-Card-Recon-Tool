@@ -3,6 +3,10 @@
 class workbook {
   #data;
   #sheet;
+  static deletedTransactions = {
+    payments: [],
+    postings: []
+  }
   static previousDays = {
     previousPayments: [
       {
@@ -286,25 +290,20 @@ class workbook {
     this.previousDays.previousPayments = [...result.unmatchingPayments];
     this.previousDays.previousPostings = [...result.unmatchingJournal];
     console.log(result);
-    // this.previousDays.previo`usPostings = [...result.unmatchingJournal];
-    // this.previousDays.previousPayments = [...result.unmatchingPayments];
-    // console.log(this.previousDays);
-    // this.previousDays.previousPayments.forEach(payment => console.log(payment["Transaction Amount"]))
   }
 
-  static removeTransaction(name, roomNumber, amount) {
+  static removePosting(transactionIndex) {
     const unmatched = this.previousDays.previousPostings;
-    unmatched.splice(
-      unmatched.findIndex(
-        (transactionToRemove) =>
-          transactionToRemove["GUEST_FULL_NAME"] === name &&
-          transactionToRemove[roomNumber] === roomNumber
-          && transactionToRemove['PRINT_CASHIER_CREDIT'] === amount,
-          
-      ),
-      1,
-    );
+    this.deletedTransactions.postings.push(unmatched[transactionIndex])
+    unmatched.splice(transactionIndex, 1);
   }
+
+  static removePayment(paymentsIndex){
+    const unmatched = this.previousDays.previousPayments;
+    this.deletedTransactions.payments.push(unmatched[paymentsIndex])
+    unmatched.splice(paymentsIndex, 1);
+  }
+
 }
 
 async function call() {
@@ -321,17 +320,27 @@ async function call() {
   workbook.performRecon(Journal, Merchant, 46274);
   workbook.performRecon(Journal, Merchant, 46275);
   workbook.performRecon(Journal, Merchant, 46276);
-  // workbook.removeTransaction("Algholeeqa,Abdulaziz,MR", "T30213","-4479.52");
-  workbook.removeTransaction("Alasqah,Sumayyah,MRS", "T30213","-4479.52");
-  // workbook.performRecon(Journal, Merchant, 46277);
-  
+  workbook.removePosting(9);
+  workbook.removePosting(8);
+  workbook.removePosting(7);
+  workbook.removePosting(6);
+  workbook.removePosting(5);
+  workbook.removePosting(4);
+  workbook.removePosting(3);
+  workbook.removePosting(2);
+  workbook.removePosting(0);
+
+  workbook.removePayment(8)
+  workbook.removePayment(7)
+
+  workbook.performRecon(Journal, Merchant, 46277);
+  workbook.performRecon(Journal, Merchant, 46278);
+
+
+
+
+
+
 }
 call();
 
-// the files
-// the payment date
-// payment method
-
-// allocate any corrections
-// i need to carry over unreconciled transactions
-//could be done by inheritance
