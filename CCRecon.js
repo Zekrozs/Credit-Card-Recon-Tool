@@ -11,13 +11,15 @@ class workbook {
     payments: [],
     postings: [],
   };
+  static previousDaysFileHandle;
   static async loadPreviousDays(file) {
-    if (!(file instanceof File)) {
+    if (!file) {
       throw new Error("please select a JSON file");
     }
     let data;
     try {
-      const text = await file.text();
+      const read = await file.getFile();
+      const text = await read.text()
       data = await JSON.parse(text);
     } catch (e) {
       throw new Error(`couldn't read the file's content: ${e.message}`);
@@ -29,7 +31,9 @@ class workbook {
     ) {
       throw new Error("the file must contain previous transactions arrays");
     }
+    workbook.previousDaysFileHandle = file
     workbook.previousDays = data;
+    console.log(`${file.name} loaded`)
   }
 
   constructor(data) {
@@ -207,6 +211,18 @@ class workbook {
     
 
     console.log(result);
+    return result
+  }
+
+  static async saveData(pending){
+    const fileHandle = workbook.previousDaysFileHandle
+    const pastTransactions = {
+      previousPostings: pending.unmatchingJournal,
+      previousPayments: pending.unmatchingPayments
+    }
+    const writable = await fileHandle.createWritable()
+    await writable.write(JSON.stringify(pastTransactions, null, 2))
+    await writable.close()
   }
 
   static removePosting(transactionIndex) {
@@ -250,37 +266,44 @@ async function call() {
   workbook.removePayment(7);
 
   workbook.performRecon(Journal, Merchant, 46277);
-  workbook.performRecon(Journal, Merchant, 46278);
+  const result = workbook.performRecon(Journal, Merchant, 46278);
+  workbook.saveData(result)
 }
 
 
-document.addEventListener('change', async (e)=>{
+document.addEventListener('click', async (e)=>{
   const target = e.target
 
   const pastTransactions = target.closest('[data-selection="pending-transactions"]')
   if(pastTransactions){
-    const file = pastTransactions.files[0]
-    if(!file){
-      console.error('please select a JSON file first')
-      return;
+    try{
+      const [handle] = await window.showOpenFilePicker({
+        multiple: false,
+        types: [
+          {
+            description: 'JSON file',
+            accept:{
+              "application/json": [".json"],
+            }
+          }
+        ]
+      })
+       await workbook.loadPreviousDays(handle)
+       await call();
+    } catch (error){
+      console.error(error.message)
     }
-
-  try{
-    await workbook.loadPreviousDays(file)
-    console.log(`${file.name} loaded`)
-  } catch (error){
-    console.log(error.message)
-  }
-  call();
+  
+ 
   }
 })
 
-document.addEventListener('click', e =>{
-const target = e.target
+// document.addEventListener('click', e =>{
+// const target = e.target
 
-const pastButton = target.closest('[data-button="past-transactions"]')
-if(pastButton){
-  DOM.pastTransactionsBtn.click()
-}
+// const pastButton = target.closest('[data-button="past-transactions"]')
+// if(pastButton){
+//   DOM.pastTransactionsBtn.click()
+// }
 
-})
+// })
