@@ -1,121 +1,37 @@
 "use strict";
 
+const DOM ={
+  pastTransactionsBtn: document.getElementById('previousDataFile')
+}
 class workbook {
   #data;
   #sheet;
+  static previousDays;
   static deletedTransactions = {
     payments: [],
-    postings: []
-  }
-  static previousDays = {
-    previousPayments: [
-      {
-        "3D Secure": " ",
-        "Account Number": "'262320203004",
-        "Authorization Code": 141346,
-        "Card Number": "444439******8178",
-        "Card Type": "VISA Intl.",
-        "CashBack Amount": 0,
-        Channel: "POS",
-        "Discount Amount": -2.5,
-        "Merchant ID": "'452308220073",
-        "Order Id": "X",
-        "Payment ID": 280858890,
-        "Posting Date DD:MM:YYYY": 46268,
-        RRN: "'624521143602",
-        "Reference 1": "'  ",
-        "Reference 2": "'  ",
-        "Terminal ID": "'6420918345230822",
-        "Token Type": "CARD",
-        "Total Pay Amount": 1600,
-        "Transaction Amount": 100,
-        "Transaction Date DD:MM:YYYY": 46267,
-        "Transaction Time": 0.8851388888888889,
-        "Transaction Type": "Purchase",
-        "Txn SubType": "Purchase transactions",
-        VAT: -0.38,
-      },
-      {
-        "3D Secure": " ",
-        "Account Number": "'262320203004",
-        "Authorization Code": 240783,
-        "Card Number": "478477******6697",
-        "Card Type": "VISA",
-        "CashBack Amount": 0,
-        Channel: "POS",
-        "Discount Amount": -8.84,
-        "Merchant ID": "'452308220066",
-        "Order Id": "X",
-        "Payment ID": 280417458,
-        "Posting Date DD:MM:YYYY": 46268,
-        RRN: "'624416364771",
-        "Reference 1": "'  ",
-        "Reference 2": "'  ",
-        "Terminal ID": "'6420930745230822",
-        "Token Type": "CARD",
-        "Total Pay Amount": 2943.48,
-        "Transaction Amount": 570,
-        "Transaction Date DD:MM:YYYY": 46266,
-        "Transaction Time": 0.6922106481481481,
-        "Transaction Type": "Purchase",
-        "Txn SubType": "Purchase transactions",
-        VAT: -1.33,
-      },
-      {
-        "3D Secure": " ",
-        "Account Number": "'262320203004",
-        "Authorization Code": 59240,
-        "Card Number": "445310******1675",
-        "Card Type": "VISA",
-        "CashBack Amount": 0,
-        Channel: "POS",
-        "Discount Amount": -13.95,
-        "Merchant ID": "'452308220066",
-        "Order Id": "X",
-        "Payment ID": 280417458,
-        "Posting Date DD:MM:YYYY": 46268,
-        RRN: "'624416233870",
-        "Reference 1": "'  ",
-        "Reference 2": "'  ",
-        "Terminal ID": "'6420930745230822",
-        "Token Type": "CARD",
-        "Total Pay Amount": 2943.48,
-        "Transaction Amount": 900,
-        "Transaction Date DD:MM:YYYY": 46266,
-        "Transaction Time": 0.6830787037037037,
-        "Transaction Type": "Purchase",
-        "Txn SubType": "Purchase transactions",
-        VAT: -2.09,
-      },
-      {
-        "3D Secure": " ",
-        "Account Number": "'262320203004",
-        "Authorization Code": 976296,
-        "Card Number": "460901******5050",
-        "Card Type": "VISA Intl.",
-        "CashBack Amount": 0,
-        Channel: "POS",
-        "Discount Amount": -36.84,
-        "Merchant ID": "'452308220066",
-        "Order Id": "X",
-        "Payment ID": 280417458,
-        "Posting Date DD:MM:YYYY": 46268,
-        RRN: "'624414535366",
-        "Reference 1": "'  ",
-        "Reference 2": "'  ",
-        "Terminal ID": "'6420930745230822",
-        "Token Type": "CARD",
-        "Total Pay Amount": 2943.48,
-        "Transaction Amount": 1473.48,
-        "Transaction Date DD:MM:YYYY": 46266,
-        "Transaction Time": 0.6207523148148149,
-        "Transaction Type": "Purchase",
-        "Txn SubType": "Purchase transactions",
-        VAT: -5.53,
-      },
-    ],
-    previousPostings: [],
+    postings: [],
   };
+  static async loadPreviousDays(file) {
+    if (!(file instanceof File)) {
+      throw new Error("please select a JSON file");
+    }
+    let data;
+    try {
+      const text = await file.text();
+      data = await JSON.parse(text);
+    } catch (e) {
+      throw new Error(`couldn't read the file's content: ${e.message}`);
+    }
+
+    if (
+      !Array.isArray(data.previousPayments) ||
+      !Array.isArray(data.previousPostings)
+    ) {
+      throw new Error("the file must contain previous transactions arrays");
+    }
+    workbook.previousDays = data;
+  }
+
   constructor(data) {
     this.#data = data;
   }
@@ -164,7 +80,6 @@ class workbook {
     if (!selectedPaymentDate) {
       throw new Error(`could not get date: ${selectedPaymentDate}`);
     }
-
     const POSPayments = selectedPaymentDate
       .filter((transaction) => transaction["Channel"]?.toUpperCase() === "POS")
       .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); // added by user
@@ -289,21 +204,22 @@ class workbook {
     );
     this.previousDays.previousPayments = [...result.unmatchingPayments];
     this.previousDays.previousPostings = [...result.unmatchingJournal];
+    
+
     console.log(result);
   }
 
   static removePosting(transactionIndex) {
     const unmatched = this.previousDays.previousPostings;
-    this.deletedTransactions.postings.push(unmatched[transactionIndex])
+    this.deletedTransactions.postings.push(unmatched[transactionIndex]);
     unmatched.splice(transactionIndex, 1);
   }
 
-  static removePayment(paymentsIndex){
+  static removePayment(paymentsIndex) {
     const unmatched = this.previousDays.previousPayments;
-    this.deletedTransactions.payments.push(unmatched[paymentsIndex])
+    this.deletedTransactions.payments.push(unmatched[paymentsIndex]);
     unmatched.splice(paymentsIndex, 1);
   }
-
 }
 
 async function call() {
@@ -330,17 +246,41 @@ async function call() {
   workbook.removePosting(2);
   workbook.removePosting(0);
 
-  workbook.removePayment(8)
-  workbook.removePayment(7)
+  workbook.removePayment(8);
+  workbook.removePayment(7);
 
   workbook.performRecon(Journal, Merchant, 46277);
   workbook.performRecon(Journal, Merchant, 46278);
-
-
-
-
-
-
 }
-call();
 
+
+document.addEventListener('change', async (e)=>{
+  const target = e.target
+
+  const pastTransactions = target.closest('[data-selection="pending-transactions"]')
+  if(pastTransactions){
+    const file = pastTransactions.files[0]
+    if(!file){
+      console.error('please select a JSON file first')
+      return;
+    }
+
+  try{
+    await workbook.loadPreviousDays(file)
+    console.log(`${file.name} loaded`)
+  } catch (error){
+    console.log(error.message)
+  }
+  call();
+  }
+})
+
+document.addEventListener('click', e =>{
+const target = e.target
+
+const pastButton = target.closest('[data-button="past-transactions"]')
+if(pastButton){
+  DOM.pastTransactionsBtn.click()
+}
+
+})
