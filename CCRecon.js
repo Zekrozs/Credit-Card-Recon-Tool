@@ -1,8 +1,8 @@
 "use strict";
 
-const DOM ={
-  pastTransactionsBtn: document.getElementById('previousDataFile')
-}
+const DOM = {
+  pastTransactionsBtn: document.getElementById("previousDataFile"),
+};
 class workbook {
   #data;
   #sheet;
@@ -19,7 +19,7 @@ class workbook {
     let data;
     try {
       const read = await file.getFile();
-      const text = await read.text()
+      const text = await read.text();
       data = await JSON.parse(text);
     } catch (e) {
       throw new Error(`couldn't read the file's content: ${e.message}`);
@@ -31,9 +31,9 @@ class workbook {
     ) {
       throw new Error("the file must contain previous transactions arrays");
     }
-    workbook.previousDaysFileHandle = file
+    workbook.previousDaysFileHandle = file;
     workbook.previousDays = data;
-    console.log(`${file.name} loaded`)
+    console.log(`${file.name} loaded`);
   }
 
   constructor(data) {
@@ -208,21 +208,69 @@ class workbook {
     );
     this.previousDays.previousPayments = [...result.unmatchingPayments];
     this.previousDays.previousPostings = [...result.unmatchingJournal];
-    
 
     console.log(result);
-    return result
+    return result;
   }
 
-  static async saveData(pending){
-    const fileHandle = workbook.previousDaysFileHandle
+  static async saveData(pending) {
+    const fileHandle = workbook.previousDaysFileHandle;
+    if (!fileHandle) {
+      throw new Error("No previously loaded file is avaliable");
+    }
+    const permission = await fileHandle.requestPermission({
+      mode: "readwrite",
+    });
+
+    if (permission !== "granted") {
+      throw new Error("write permission was not granted");
+    }
+
     const pastTransactions = {
       previousPostings: pending.unmatchingJournal,
-      previousPayments: pending.unmatchingPayments
+      previousPayments: pending.unmatchingPayments,
+    };
+
+    const writable = await fileHandle.createWritable();
+    try {
+      await writable.write(JSON.stringify(pastTransactions, null, 2));
+    } finally {
+      await writable.close();
     }
-    const writable = await fileHandle.createWritable()
-    await writable.write(JSON.stringify(pastTransactions, null, 2))
-    await writable.close()
+  }
+
+  static async backupData(pending) {
+    const backupData = {
+      previousPostings: pending.unmatchingJournal,
+      previousPayments: pending.unmatchingPayments,
+    };
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+    const backupHandle = await window.showSaveFilePicker({
+      suggestedName: `pending-transactions-backup-${timestamp}.json`,
+      types: [
+        {
+          description: "JSON file",
+          accept: {
+            "application/json": [".json"],
+          },
+        },
+      ],
+    });
+
+    const writable = await backupHandle.createWritable()
+
+    try{
+      await writable.write(JSON.stringify(backupData,null, 2))
+    } catch { 
+      throw new Error(`couldnt create a backup file`)
+    }
+    finally{
+      await writable.close()
+    }
+    console.log(`${backupHandle.name} backed up`)
+    return true
   }
 
   static removePosting(transactionIndex) {
@@ -267,36 +315,39 @@ async function call() {
 
   workbook.performRecon(Journal, Merchant, 46277);
   const result = workbook.performRecon(Journal, Merchant, 46278);
-  workbook.saveData(result)
+  const dataBackedUp = await workbook.backupData(result)
+  if(dataBackedUp){
+     await workbook.saveData(result);
+  }
+ 
 }
 
+document.addEventListener("click", async (e) => {
+  const target = e.target;
 
-document.addEventListener('click', async (e)=>{
-  const target = e.target
-
-  const pastTransactions = target.closest('[data-selection="pending-transactions"]')
-  if(pastTransactions){
-    try{
+  const pastTransactions = target.closest(
+    '[data-selection="pending-transactions"]',
+  );
+  if (pastTransactions) {
+    try {
       const [handle] = await window.showOpenFilePicker({
         multiple: false,
         types: [
           {
-            description: 'JSON file',
-            accept:{
+            description: "JSON file",
+            accept: {
               "application/json": [".json"],
-            }
-          }
-        ]
-      })
-       await workbook.loadPreviousDays(handle)
-       await call();
-    } catch (error){
-      console.error(error.message)
+            },
+          },
+        ],
+      });
+      await workbook.loadPreviousDays(handle);
+      await call();
+    } catch (error) {
+      console.error(error.message);
     }
-  
- 
   }
-})
+});
 
 // document.addEventListener('click', e =>{
 // const target = e.target
