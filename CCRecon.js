@@ -3,7 +3,36 @@
 const DOM = {
   pastTransactionsBtn: document.getElementById("previousDataFile"),
 };
-class workbook {
+function includesText(value, text) {
+  return (value ?? "").toUpperCase().includes(text.toUpperCase());
+}
+  const EXCEL_EPOCH_OFFSET = 25569;
+  const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+function excelSerialToDate(serialDate) {
+
+  const serial = +serialDate;
+
+  if (!Number.isFinite(serial)) {
+    return null;
+  }
+
+  return new Date((serial - EXCEL_EPOCH_OFFSET) * MILLISECONDS_PER_DAY);
+}
+
+function toDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+class Workbook {
   #data;
   #sheet;
   static previousDays;
@@ -31,8 +60,8 @@ class workbook {
     ) {
       throw new Error("the file must contain previous transactions arrays");
     }
-    workbook.previousDaysFileHandle = file;
-    workbook.previousDays = data;
+    Workbook.previousDaysFileHandle = file;
+    Workbook.previousDays = data;
     console.log(`${file.name} loaded`);
   }
 
@@ -64,7 +93,7 @@ class workbook {
       throw new Error("something went wrong, could not read workbook data");
     }
 
-    return new workbook(data);
+    return new Workbook(data);
   }
   async getReconSheet() {
     if (!this.#data) {
@@ -73,55 +102,60 @@ class workbook {
     const workSheet = this.#data?.Sheets[this.#data.SheetNames[0]];
     this.#sheet = await XLSX.utils.sheet_to_json(workSheet);
   }
-
+  static exposeSheet(journal, merchant) {
+    return {
+      journal: journal.#sheet,
+      merchant: merchant.#sheet,
+    };
+  }
+  // paymentdate is added by user
   static getTransactions(journal, merchant, paymentDate) {
-    if (!journal.#sheet) {
-      throw new Error(`recon sheet is unavaliable`);
+    if (
+      !this.exposeSheet(journal, merchant).journal ||
+      !this.exposeSheet(journal, merchant).merchant
+    ) {
+      throw new Error(`one or more recon sheet is unavaliable`);
     }
     const selectedPaymentDate = merchant.#sheet.filter(
       (requestedDay) => requestedDay["Posting Date DD:MM:YYYY"] == paymentDate,
     );
-    if (!selectedPaymentDate) {
+    if (selectedPaymentDate.length === 0) {
       throw new Error(`could not get date: ${selectedPaymentDate}`);
     }
     const POSPayments = selectedPaymentDate
-      .filter((transaction) => transaction["Channel"]?.toUpperCase() === "POS")
-      .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); // added by user
+      .filter((transaction) => includesText(transaction["Channel"], "POS"))
+      .filter((card) => includesText(card["Card Type"], "VISA")); // added by user
     const ECOMPayments = selectedPaymentDate
-      .filter((transaction) => transaction["Channel"]?.toUpperCase() === "ECOM")
-      .filter((card) => card["Card Type"]?.toUpperCase().includes("VISA")); //added by user
+      .filter((transaction) => includesText(transaction["Channel"], "ECOM"))
+      .filter((card) => includesText(card["Card Type"], "VISA")); //added by user
 
     const ECOMRefunds = selectedPaymentDate.filter(
       (debitAmount) =>
-        debitAmount["Transaction Type"]?.toUpperCase().includes("CREDIT") &&
-        debitAmount["Channel"]?.toUpperCase() === "ECOM" &&
-        debitAmount["Card Type"]?.toUpperCase().includes("VISA"),
+        includesText(debitAmount["Transaction Type"], "CREDIT") &&
+        includesText(debitAmount["Channel"], "ECOM") &&
+        includesText(debitAmount["Card Type"], "VISA"),
     );
 
     POSPayments.push(...ECOMRefunds);
-
-    const dayToMs = 24 * 60 * 60 * 1000;
-    const parsedPaymentDate = (+paymentDate - 25569) * dayToMs;
+    const parsedPaymentDate = excelSerialToDate(+paymentDate);
     if (!parsedPaymentDate) return;
-    const manualDate = new Date(parsedPaymentDate - 3 * dayToMs);
-    const MicrosDate = new Date(parsedPaymentDate - 1 * dayToMs);
-    manualDate.setHours(0, 0, 0, 0);
-    MicrosDate.setHours(0, 0, 0, 0);
+    const manualSettelmentWindow = 3
+    const MicrosSettelmentWindow = 1
+    const manualPostingDate = new Date(parsedPaymentDate.getTime() - manualSettelmentWindow * MILLISECONDS_PER_DAY,);
+    const microsPostingDate = new Date(parsedPaymentDate.getTime() - MicrosSettelmentWindow * MILLISECONDS_PER_DAY,);
     const Manual = journal.#sheet
       .filter(
         (manualPosting) =>
-          new Date(manualPosting["BUSINESS_DATE"])?.toDateString() ==
-          manualDate?.toDateString(),
+         toDateKey(manualPosting["BUSINESS_DATE"]) ===
+         toDateKey(manualPostingDate)
       )
-      .filter((transaction) =>
-        transaction["TRX_DESC"]?.toUpperCase().includes("MANUAL"),
-      )
+      .filter((transaction) => includesText(transaction["TRX_DESC"], "MANUAL"))
       .filter(
         (type) =>
           !(
-            type["REMARK"]?.toUpperCase().includes("LINK") ||
-            type["CREDIT_CARD_SUPPLEMENT"]?.toUpperCase().includes("LINK") ||
-            type["REFERENCE"]?.toUpperCase().includes("LINK")
+            includesText(type["REMARK"], "LINK") ||
+            includesText(type["CREDIT_CARD_SUPPLEMENT"], "LINK") ||
+            includesText(type["REFERENCE"], "LINK")
           ),
       );
 
@@ -129,7 +163,7 @@ class workbook {
       .filter(
         (POSPosting) =>
           new Date(POSPosting["BUSINESS_DATE"])?.toDateString() ==
-          MicrosDate?.toDateString(),
+          microsPostingDate?.toDateString(),
       )
       .filter((transaction) =>
         transaction["TRX_DESC"]?.toUpperCase().includes("POS"),
@@ -139,7 +173,7 @@ class workbook {
   }
 
   static performRecon(journal, merchant, paymentDate) {
-    const reconData = workbook.getTransactions(journal, merchant, paymentDate);
+    const reconData = Workbook.getTransactions(journal, merchant, paymentDate);
     if (!reconData) {
       throw new Error(`couldnt get Recon data`);
     }
@@ -159,7 +193,7 @@ class workbook {
     allJournalTransactions.forEach((transaction, index) => {
       for (let i = index + 1; i < allJournalTransactions.length; i++) {
         if (correctionIndex.has(index) || correctionIndex.has(i)) break;
-        if (transaction["REFERENCE"]?.toUpperCase().includes("REFUND")) break;
+        if (includesText(transaction["REFERENCE"], 'REFUND')) break;
         const valueOne =
           allJournalTransactions[index][["PRINT_CASHIER_CREDIT"]];
         const valueTwo = allJournalTransactions[i][["PRINT_CASHIER_CREDIT"]];
@@ -214,7 +248,7 @@ class workbook {
   }
 
   static async saveData(pending) {
-    const fileHandle = workbook.previousDaysFileHandle;
+    const fileHandle = Workbook.previousDaysFileHandle;
     if (!fileHandle) {
       throw new Error("No previously loaded file is avaliable");
     }
@@ -259,18 +293,17 @@ class workbook {
       ],
     });
 
-    const writable = await backupHandle.createWritable()
+    const writable = await backupHandle.createWritable();
 
-    try{
-      await writable.write(JSON.stringify(backupData,null, 2))
-    } catch { 
-      throw new Error(`couldnt create a backup file`)
+    try {
+      await writable.write(JSON.stringify(backupData, null, 2));
+    } catch {
+      throw new Error(`couldnt create a backup file`);
+    } finally {
+      await writable.close();
     }
-    finally{
-      await writable.close()
-    }
-    console.log(`${backupHandle.name} backed up`)
-    return true
+    console.log(`${backupHandle.name} backed up`);
+    return true;
   }
 
   static removePosting(transactionIndex) {
@@ -287,39 +320,38 @@ class workbook {
 }
 
 async function call() {
-  const Journal = await workbook.create("./excel/Journal.xlsx");
-  const Merchant = await workbook.create("./excel/Merchant September.xlsx");
+  const Journal = await Workbook.create("./excel/Journal.xlsx");
+  const Merchant = await Workbook.create("./excel/Merchant September.xlsx");
   await Journal.getReconSheet();
   await Merchant.getReconSheet();
 
-  workbook.performRecon(Journal, Merchant, 46269);
-  workbook.performRecon(Journal, Merchant, 46270);
-  workbook.performRecon(Journal, Merchant, 46271);
-  workbook.performRecon(Journal, Merchant, 46272);
-  workbook.performRecon(Journal, Merchant, 46273);
-  workbook.performRecon(Journal, Merchant, 46274);
-  workbook.performRecon(Journal, Merchant, 46275);
-  workbook.performRecon(Journal, Merchant, 46276);
-  workbook.removePosting(9);
-  workbook.removePosting(8);
-  workbook.removePosting(7);
-  workbook.removePosting(6);
-  workbook.removePosting(5);
-  workbook.removePosting(4);
-  workbook.removePosting(3);
-  workbook.removePosting(2);
-  workbook.removePosting(0);
+  Workbook.performRecon(Journal, Merchant, 46269);
+  Workbook.performRecon(Journal, Merchant, 46270);
+  Workbook.performRecon(Journal, Merchant, 46271);
+  Workbook.performRecon(Journal, Merchant, 46272);
+  Workbook.performRecon(Journal, Merchant, 46273);
+  Workbook.performRecon(Journal, Merchant, 46274);
+  Workbook.performRecon(Journal, Merchant, 46275);
+  Workbook.performRecon(Journal, Merchant, 46276);
+  Workbook.removePosting(9);
+  Workbook.removePosting(8);
+  Workbook.removePosting(7);
+  Workbook.removePosting(6);
+  Workbook.removePosting(5);
+  Workbook.removePosting(4);
+  Workbook.removePosting(3);
+  Workbook.removePosting(2);
+  Workbook.removePosting(0);
 
-  workbook.removePayment(8);
-  workbook.removePayment(7);
+  Workbook.removePayment(8);
+  Workbook.removePayment(7);
 
-  workbook.performRecon(Journal, Merchant, 46277);
-  const result = workbook.performRecon(Journal, Merchant, 46278);
-  const dataBackedUp = await workbook.backupData(result)
-  if(dataBackedUp){
-     await workbook.saveData(result);
+  Workbook.performRecon(Journal, Merchant, 46277);
+  const result = Workbook.performRecon(Journal, Merchant, 46278);
+  const dataBackedUp = await Workbook.backupData(result);
+  if (dataBackedUp) {
+    await Workbook.saveData(result);
   }
- 
 }
 
 document.addEventListener("click", async (e) => {
@@ -341,7 +373,7 @@ document.addEventListener("click", async (e) => {
           },
         ],
       });
-      await workbook.loadPreviousDays(handle);
+      await Workbook.loadPreviousDays(handle);
       await call();
     } catch (error) {
       console.error(error.message);
