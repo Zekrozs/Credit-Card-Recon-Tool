@@ -32,9 +32,61 @@ function toDateKey(value) {
 }
 
 const CARD_SCHEMES = {
-  VISA: 'visa',
-  MASTER: 'master',
-  MADA: 'mada',
+  VISA: "visa",
+  MASTER: "master",
+  MADA: "mada",
+};
+
+function removeCorrections(postings) {
+  const correctionIndex = new Set();
+  postings.forEach((posting, index) => {
+    if (correctionIndex.has(index)) return;
+    for (let nextIndex = index + 1; nextIndex < postings.length; nextIndex++) {
+      if (includesText(posting["REFERENCE"], "REFUND")) break;
+      if (correctionIndex.has(nextIndex)) continue;
+      const valueOne = posting[["PRINT_CASHIER_CREDIT"]];
+      const valueTwo = postings[nextIndex][["PRINT_CASHIER_CREDIT"]];
+
+      if (+valueOne + +valueTwo === 0) {
+        correctionIndex.add(index);
+        correctionIndex.add(nextIndex);
+        break;
+      }
+    }
+  });
+  return postings.filter((_, index) => !correctionIndex.has(index));
+}
+
+function matchTransactions(postings, payments) {
+  let usedJournalTransactions = new Set();
+  const matchingTransactions = [];
+  const unmatchingPayments = [];
+  payments.forEach((payment) => {
+    const revenueIndex = postings.findIndex(
+      (revenue, index) =>
+        !usedJournalTransactions.has(index) &&
+        +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"],
+    );
+
+    if (revenueIndex === -1) {
+      unmatchingPayments.push(payment);
+    } else {
+      usedJournalTransactions.add(revenueIndex);
+      matchingTransactions.push({
+        payment,
+        revenue: postings[revenueIndex],
+      });
+    }
+  });
+ const  unmatchingJournal = postings.filter(
+    (_, index) => !usedJournalTransactions.has(index),
+  );
+
+  return {
+    matchingTransactions,
+    unmatchingPayments,
+    unmatchingJournal,
+  };
 }
 
 class Workbook {
@@ -112,13 +164,15 @@ class Workbook {
     if (!this.#sheet) {
       throw new Error("The reconciliation sheet has not been loaded");
     }
-    return structuredClone(this.#sheet)
+    return structuredClone(this.#sheet);
   }
   // paymentdate is added by user
-  static getTransactions(journalInstance,
-     merchantInstance, 
-     paymentDate,
-    cardScheme = CARD_SCHEMES.VISA) {
+  static getTransactions(
+    journalInstance,
+    merchantInstance,
+    paymentDate,
+    cardScheme = CARD_SCHEMES.VISA,
+  ) {
     const journalRows = journalInstance.getRows();
     const merchantRows = merchantInstance.getRows();
     if (!journalRows || !merchantRows) {
@@ -130,8 +184,9 @@ class Workbook {
     if (selectedPaymentDate.length === 0) {
       throw new Error(`could not get date: ${selectedPaymentDate}`);
     }
-    const posPaymentsForScheme = selectedPaymentDate
-      .filter((card) => includesText(card["Card Type"], cardScheme)); // added by user
+    const posPaymentsForScheme = selectedPaymentDate.filter((card) =>
+      includesText(card["Card Type"], cardScheme),
+    ); // added by user
     const ECOMPaymentsForScheme = selectedPaymentDate
       .filter((transaction) => includesText(transaction["Channel"], "ECOM"))
       .filter((card) => includesText(card["Card Type"], cardScheme)); //added by user
@@ -142,7 +197,7 @@ class Workbook {
         (includesText(transaction["Channel"], "ECOM") &&
           includesText(transaction["Transaction Type"], "CREDIT")),
     );
-    
+
     const parsedPaymentDate = excelSerialToDate(+paymentDate);
     if (!parsedPaymentDate) return;
     const manualSettelmentWindow = 3;
@@ -185,7 +240,11 @@ class Workbook {
   }
 
   static performRecon(journalInstance, merchantInstance, paymentDate) {
-    const reconData = Workbook.getTransactions(journalInstance, merchantInstance, paymentDate);
+    const reconData = Workbook.getTransactions(
+      journalInstance,
+      merchantInstance,
+      paymentDate,
+    );
     if (!reconData) {
       throw new Error(`couldnt get Recon data`);
     }
@@ -194,69 +253,19 @@ class Workbook {
       ...reconData.POSPayments,
     ];
     const allJournalTransactions = [...reconData.Manual, ...reconData.Micros];
-    const result = {
-      usedJournalTransactions: new Set(),
-      matchingTransactions: [],
-      unmatchingPayments: [],
-    };
 
-    const correctionIndex = new Set();
-
-    allJournalTransactions.forEach((transaction, index) => {
-      for (let i = index + 1; i < allJournalTransactions.length; i++) {
-        if (correctionIndex.has(index) || correctionIndex.has(i)) break;
-        if (includesText(transaction["REFERENCE"], "REFUND")) break;
-        const valueOne =
-          allJournalTransactions[index][["PRINT_CASHIER_CREDIT"]];
-        const valueTwo = allJournalTransactions[i][["PRINT_CASHIER_CREDIT"]];
-
-        if (+valueOne + +valueTwo === 0) {
-          correctionIndex.add(index);
-          correctionIndex.add(i);
-          break;
-        }
-      }
-    });
-
-    const journalAfterCorrections = allJournalTransactions.filter(
-      (_, index) => !correctionIndex.has(index),
-    );
+    const reconcilableJournal = removeCorrections(allJournalTransactions);
 
     const reconJournal = [
-      ...journalAfterCorrections,
+      ...reconcilableJournal,
       ...this.previousDays.previousPostings,
     ];
-    // console.log({
-    //   allJournalCount: allJournalTransactions.length,
-    //   removedAsCorrections: correctionIndex.size,
-    //   journalAfterCorrectionsCount: journalAfterCorrections.length,
-    //   reconJournalCount: reconJournal.length,
-    // });
-    allPayments.forEach((payment) => {
-      const revenueIndex = reconJournal.findIndex(
-        (revenue, index) =>
-          !result.usedJournalTransactions.has(index) &&
-          +revenue["PRINT_CASHIER_CREDIT"] === +payment["Transaction Amount"],
-      );
 
-      if (revenueIndex === -1) {
-        result.unmatchingPayments.push(payment);
-      } else {
-        result.usedJournalTransactions.add(revenueIndex);
-        result.matchingTransactions.push({
-          payment,
-          revenue: reconJournal[revenueIndex],
-        });
-      }
-    });
-    result.unmatchingJournal = reconJournal.filter(
-      (_, index) => !result.usedJournalTransactions.has(index),
-    );
-    this.previousDays.previousPayments = [...result.unmatchingPayments];
-    this.previousDays.previousPostings = [...result.unmatchingJournal];
-
-    console.log(result);
-    return result;
+    const reconResult = matchTransactions(reconJournal, allPayments);
+    this.previousDays.previousPayments = [...reconResult.unmatchingPayments];
+    this.previousDays.previousPostings = [...reconResult.unmatchingJournal];
+    console.log(reconResult)
+    return reconResult
   }
 
   static async saveData(pending) {
