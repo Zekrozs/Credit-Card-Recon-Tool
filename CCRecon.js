@@ -6,10 +6,9 @@ const DOM = {
 function includesText(value, text) {
   return (value ?? "").toUpperCase().includes(text.toUpperCase());
 }
-  const EXCEL_EPOCH_OFFSET = 25569;
-  const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const EXCEL_EPOCH_OFFSET = 25569;
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 function excelSerialToDate(serialDate) {
-
   const serial = +serialDate;
 
   if (!Number.isFinite(serial)) {
@@ -95,28 +94,28 @@ class Workbook {
 
     return new Workbook(data);
   }
-  async getReconSheet() {
-    if (!this.#data) {
-      throw new Error(`something went wrong`);
+  getReconSheet() {
+    if (!this.#data || !this.#data.SheetNames?.length) {
+      throw new Error(`Workbook data is unavailable`);
     }
-    const workSheet = this.#data?.Sheets[this.#data.SheetNames[0]];
-    this.#sheet = await XLSX.utils.sheet_to_json(workSheet);
+    const firstSheetName = this.#data.SheetNames[0];
+    const worksheet = this.#data.Sheets[firstSheetName];
+    this.#sheet = XLSX.utils.sheet_to_json(worksheet);
   }
-  static exposeSheet(journal, merchant) {
-    return {
-      journal: journal.#sheet,
-      merchant: merchant.#sheet,
-    };
+  getRows() {
+    if (!this.#sheet) {
+      throw new Error("The reconciliation sheet has not been loaded");
+    }
+    return this.#sheet;
   }
   // paymentdate is added by user
-  static getTransactions(journal, merchant, paymentDate) {
-    if (
-      !this.exposeSheet(journal, merchant).journal ||
-      !this.exposeSheet(journal, merchant).merchant
-    ) {
+  static getTransactions(journalInstance, merchantInstance, paymentDate) {
+    const journalRows = journalInstance.getRows();
+    const merchantRows = merchantInstance.getRows();
+    if (!journalRows || !merchantRows) {
       throw new Error(`one or more recon sheet is unavaliable`);
     }
-    const selectedPaymentDate = merchant.#sheet.filter(
+    const selectedPaymentDate = merchantInstance.#sheet.filter(
       (requestedDay) => requestedDay["Posting Date DD:MM:YYYY"] == paymentDate,
     );
     if (selectedPaymentDate.length === 0) {
@@ -139,15 +138,21 @@ class Workbook {
     POSPayments.push(...ECOMRefunds);
     const parsedPaymentDate = excelSerialToDate(+paymentDate);
     if (!parsedPaymentDate) return;
-    const manualSettelmentWindow = 3
-    const MicrosSettelmentWindow = 1
-    const manualPostingDate = new Date(parsedPaymentDate.getTime() - manualSettelmentWindow * MILLISECONDS_PER_DAY,);
-    const microsPostingDate = new Date(parsedPaymentDate.getTime() - MicrosSettelmentWindow * MILLISECONDS_PER_DAY,);
-    const Manual = journal.#sheet
+    const manualSettelmentWindow = 3;
+    const MicrosSettelmentWindow = 1;
+    const manualPostingDate = new Date(
+      parsedPaymentDate.getTime() -
+        manualSettelmentWindow * MILLISECONDS_PER_DAY,
+    );
+    const microsPostingDate = new Date(
+      parsedPaymentDate.getTime() -
+        MicrosSettelmentWindow * MILLISECONDS_PER_DAY,
+    );
+    const Manual = journalInstance.#sheet
       .filter(
         (manualPosting) =>
-         toDateKey(manualPosting["BUSINESS_DATE"]) ===
-         toDateKey(manualPostingDate)
+          toDateKey(manualPosting["BUSINESS_DATE"]) ===
+          toDateKey(manualPostingDate),
       )
       .filter((transaction) => includesText(transaction["TRX_DESC"], "MANUAL"))
       .filter(
@@ -159,11 +164,11 @@ class Workbook {
           ),
       );
 
-    const Micros = journal.#sheet
+    const Micros = journalInstance.#sheet
       .filter(
         (POSPosting) =>
-          new Date(POSPosting["BUSINESS_DATE"])?.toDateString() ==
-          microsPostingDate?.toDateString(),
+          toDateKey(POSPosting["BUSINESS_DATE"]) ==
+          toDateKey(microsPostingDate),
       )
       .filter((transaction) =>
         transaction["TRX_DESC"]?.toUpperCase().includes("POS"),
@@ -172,8 +177,8 @@ class Workbook {
     return { Manual, Micros, POSPayments };
   }
 
-  static performRecon(journal, merchant, paymentDate) {
-    const reconData = Workbook.getTransactions(journal, merchant, paymentDate);
+  static performRecon(journalInstance, merchantInstance, paymentDate) {
+    const reconData = Workbook.getTransactions(journalInstance, merchantInstance, paymentDate);
     if (!reconData) {
       throw new Error(`couldnt get Recon data`);
     }
@@ -193,7 +198,7 @@ class Workbook {
     allJournalTransactions.forEach((transaction, index) => {
       for (let i = index + 1; i < allJournalTransactions.length; i++) {
         if (correctionIndex.has(index) || correctionIndex.has(i)) break;
-        if (includesText(transaction["REFERENCE"], 'REFUND')) break;
+        if (includesText(transaction["REFERENCE"], "REFUND")) break;
         const valueOne =
           allJournalTransactions[index][["PRINT_CASHIER_CREDIT"]];
         const valueTwo = allJournalTransactions[i][["PRINT_CASHIER_CREDIT"]];
@@ -322,8 +327,8 @@ class Workbook {
 async function call() {
   const Journal = await Workbook.create("./excel/Journal.xlsx");
   const Merchant = await Workbook.create("./excel/Merchant September.xlsx");
-  await Journal.getReconSheet();
-  await Merchant.getReconSheet();
+  Journal.getReconSheet();
+  Merchant.getReconSheet();
 
   Workbook.performRecon(Journal, Merchant, 46269);
   Workbook.performRecon(Journal, Merchant, 46270);
