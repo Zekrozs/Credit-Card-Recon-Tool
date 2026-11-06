@@ -78,7 +78,7 @@ function matchTransactions(postings, payments) {
       });
     }
   });
- const  unmatchingJournal = postings.filter(
+  const unmatchingJournal = postings.filter(
     (_, index) => !usedJournalTransactions.has(index),
   );
 
@@ -171,7 +171,7 @@ class Workbook {
     journalInstance,
     merchantInstance,
     paymentDate,
-    cardScheme = CARD_SCHEMES.VISA,
+    cardScheme,
   ) {
     const journalRows = journalInstance.getRows();
     const merchantRows = merchantInstance.getRows();
@@ -239,33 +239,40 @@ class Workbook {
     return { Manual, Micros, POSPayments };
   }
 
-  static performRecon(journalInstance, merchantInstance, paymentDate) {
-    const reconData = Workbook.getTransactions(
+  static performRecon(
+    journalInstance,
+    merchantInstance,
+    paymentDate,
+    cardScheme,
+  ) {
+    const reconData = this.getTransactions(
       journalInstance,
       merchantInstance,
       paymentDate,
+      cardScheme,
     );
     if (!reconData) {
       throw new Error(`couldnt get Recon data`);
+    }
+    if (!this.previousDays) {
+      throw new Error("Previous transaction data has not been loaded");
     }
     const allPayments = [
       ...this.previousDays.previousPayments,
       ...reconData.POSPayments,
     ];
-    const allJournalTransactions = [...reconData.Manual, ...reconData.Micros];
-
-    const reconcilableJournal = removeCorrections(allJournalTransactions);
+    const currentPostings = [...reconData.Manual, ...reconData.Micros];
 
     const reconJournal = [
-      ...reconcilableJournal,
+      ...removeCorrections(currentPostings),
       ...this.previousDays.previousPostings,
     ];
 
     const reconResult = matchTransactions(reconJournal, allPayments);
     this.previousDays.previousPayments = [...reconResult.unmatchingPayments];
     this.previousDays.previousPostings = [...reconResult.unmatchingJournal];
-    console.log(reconResult)
-    return reconResult
+    console.log(reconResult);
+    return reconResult;
   }
 
   static async saveData(pending) {
@@ -273,6 +280,14 @@ class Workbook {
     if (!fileHandle) {
       throw new Error("No previously loaded file is avaliable");
     }
+    if (
+      !pending ||
+      !Array.isArray(pending.unmatchingJournal) ||
+      !Array.isArray(pending.unmatchingPayments)
+    ) {
+      throw new Error("Invalid pending transaction data");
+    }
+
     const permission = await fileHandle.requestPermission({
       mode: "readwrite",
     });
@@ -292,27 +307,39 @@ class Workbook {
     } finally {
       await writable.close();
     }
+    console.log(`${fileHandle.name} saved`);
   }
 
   static async backupData(pending) {
+    if (
+      !pending ||
+      !Array.isArray(pending.unmatchingJournal) ||
+      !Array.isArray(pending.unmatchingPayments)
+    ) {
+      throw new Error("Invalid pending transaction data");
+    }
     const backupData = {
       previousPostings: pending.unmatchingJournal,
       previousPayments: pending.unmatchingPayments,
     };
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-
-    const backupHandle = await window.showSaveFilePicker({
-      suggestedName: `pending-transactions-backup-${timestamp}.json`,
-      types: [
-        {
-          description: "JSON file",
-          accept: {
-            "application/json": [".json"],
+    let backupHandle;
+    try {
+      backupHandle = await window.showSaveFilePicker({
+        suggestedName: `pending-transactions-backup-${timestamp}.json`,
+        types: [
+          {
+            description: "JSON file",
+            accept: {
+              "application/json": [".json"],
+            },
           },
-        },
-      ],
-    });
+        ],
+      });
+    } catch (error) {
+      throw new Error(`Could not select a backup file: ${error.message}`);
+    }
 
     const writable = await backupHandle.createWritable();
 
@@ -328,15 +355,38 @@ class Workbook {
   }
 
   static removePosting(transactionIndex) {
+    if (!Workbook.previousDays) {
+      throw new Error("Previous transaction data has not been loaded");
+    }
+
     const unmatched = this.previousDays.previousPostings;
-    this.deletedTransactions.postings.push(unmatched[transactionIndex]);
-    unmatched.splice(transactionIndex, 1);
+
+    if (
+      !Number.isInteger(transactionIndex) ||
+      transactionIndex < 0 ||
+      transactionIndex >= unmatched.length
+    ) {
+      throw new Error(`Invalid posting index: ${transactionIndex}`);
+    }
+
+    const [removedPosting] = unmatched.splice(transactionIndex, 1);
+    Workbook.deletedTransactions.postings.push(removedPosting);
   }
 
-  static removePayment(paymentsIndex) {
+  static removePayment(paymentIndex) {
+    if (!Workbook.previousDays) {
+      throw new Error("Previous transaction data has not been loaded");
+    }
     const unmatched = this.previousDays.previousPayments;
-    this.deletedTransactions.payments.push(unmatched[paymentsIndex]);
-    unmatched.splice(paymentsIndex, 1);
+    if (
+      !Number.isInteger(paymentIndex) ||
+      paymentIndex < 0 ||
+      paymentIndex >= unmatched.length
+    ) {
+      throw new Error(`Invalid payment index: ${paymentIndex}`);
+    }
+  const [removedPayment] = unmatched.splice(paymentIndex, 1)
+  Workbook.deletedTransactions.payments.push(removedPayment);
   }
 }
 
@@ -346,14 +396,14 @@ async function call() {
   Journal.getReconSheet();
   Merchant.getReconSheet();
 
-  Workbook.performRecon(Journal, Merchant, 46269);
-  Workbook.performRecon(Journal, Merchant, 46270);
-  Workbook.performRecon(Journal, Merchant, 46271);
-  Workbook.performRecon(Journal, Merchant, 46272);
-  Workbook.performRecon(Journal, Merchant, 46273);
-  Workbook.performRecon(Journal, Merchant, 46274);
-  Workbook.performRecon(Journal, Merchant, 46275);
-  Workbook.performRecon(Journal, Merchant, 46276);
+  Workbook.performRecon(Journal, Merchant, 46269, CARD_SCHEMES.VISA);
+  Workbook.performRecon(Journal, Merchant, 46270, CARD_SCHEMES.VISA);
+  Workbook.performRecon(Journal, Merchant, 46271, CARD_SCHEMES.VISA);
+  Workbook.performRecon(Journal, Merchant, 46272, CARD_SCHEMES.VISA);
+  Workbook.performRecon(Journal, Merchant, 46273, CARD_SCHEMES.VISA);
+  Workbook.performRecon(Journal, Merchant, 46274, CARD_SCHEMES.VISA);
+  Workbook.performRecon(Journal, Merchant, 46275, CARD_SCHEMES.VISA);
+  Workbook.performRecon(Journal, Merchant, 46276, CARD_SCHEMES.VISA);
   Workbook.removePosting(9);
   Workbook.removePosting(8);
   Workbook.removePosting(7);
@@ -367,8 +417,13 @@ async function call() {
   Workbook.removePayment(8);
   Workbook.removePayment(7);
 
-  Workbook.performRecon(Journal, Merchant, 46277);
-  const result = Workbook.performRecon(Journal, Merchant, 46278);
+  Workbook.performRecon(Journal, Merchant, 46277, CARD_SCHEMES.VISA);
+  const result = Workbook.performRecon(
+    Journal,
+    Merchant,
+    46278,
+    CARD_SCHEMES.VISA,
+  );
   const dataBackedUp = await Workbook.backupData(result);
   if (dataBackedUp) {
     await Workbook.saveData(result);
