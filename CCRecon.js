@@ -31,6 +31,12 @@ function toDateKey(value) {
   ].join("-");
 }
 
+const CARD_SCHEMES = {
+  VISA: 'visa',
+  MASTER: 'master',
+  MADA: 'mada',
+}
+
 class Workbook {
   #data;
   #sheet;
@@ -106,10 +112,13 @@ class Workbook {
     if (!this.#sheet) {
       throw new Error("The reconciliation sheet has not been loaded");
     }
-    return this.#sheet;
+    return structuredClone(this.#sheet)
   }
   // paymentdate is added by user
-  static getTransactions(journalInstance, merchantInstance, paymentDate) {
+  static getTransactions(journalInstance,
+     merchantInstance, 
+     paymentDate,
+    cardScheme = CARD_SCHEMES.VISA) {
     const journalRows = journalInstance.getRows();
     const merchantRows = merchantInstance.getRows();
     if (!journalRows || !merchantRows) {
@@ -121,21 +130,19 @@ class Workbook {
     if (selectedPaymentDate.length === 0) {
       throw new Error(`could not get date: ${selectedPaymentDate}`);
     }
-    const POSPayments = selectedPaymentDate
-      .filter((transaction) => includesText(transaction["Channel"], "POS"))
-      .filter((card) => includesText(card["Card Type"], "VISA")); // added by user
-    const ECOMPayments = selectedPaymentDate
+    const posPaymentsForScheme = selectedPaymentDate
+      .filter((card) => includesText(card["Card Type"], cardScheme)); // added by user
+    const ECOMPaymentsForScheme = selectedPaymentDate
       .filter((transaction) => includesText(transaction["Channel"], "ECOM"))
-      .filter((card) => includesText(card["Card Type"], "VISA")); //added by user
+      .filter((card) => includesText(card["Card Type"], cardScheme)); //added by user
 
-    const ECOMRefunds = selectedPaymentDate.filter(
-      (debitAmount) =>
-        includesText(debitAmount["Transaction Type"], "CREDIT") &&
-        includesText(debitAmount["Channel"], "ECOM") &&
-        includesText(debitAmount["Card Type"], "VISA"),
+    const POSPayments = posPaymentsForScheme.filter(
+      (transaction) =>
+        includesText(transaction["Channel"], "POS") ||
+        (includesText(transaction["Channel"], "ECOM") &&
+          includesText(transaction["Transaction Type"], "CREDIT")),
     );
-
-    POSPayments.push(...ECOMRefunds);
+    
     const parsedPaymentDate = excelSerialToDate(+paymentDate);
     if (!parsedPaymentDate) return;
     const manualSettelmentWindow = 3;
