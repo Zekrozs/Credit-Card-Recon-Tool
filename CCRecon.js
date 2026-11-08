@@ -89,39 +89,139 @@ function matchTransactions(postings, payments) {
   };
 }
 
+class pendingTransactionsStore{
+  #fileHandle;
+  #data;
+  #deletedTransactions = {
+    payments: [],
+    postings: []
+  }
+  #ValidateIndex(index, items, itemType){
+   if(
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= items.length
+   ){
+    throw new Error(`invalid ${itemType}, index: ${index}`)
+   }
+  }
+
+  constructor(fileHandle, data){
+    this.#fileHandle = fileHandle
+    this.#data = {
+      previousPayments: [...data.previousPayments],
+      previousPostings: [...data.previousPostings]
+    }
+  }
+  static async load(fileHandle){
+    if(!fileHandle){
+      throw new Error('please Select a JSON file')
+    }
+
+    try{
+      const file = fileHandle.getFile();
+      const text = file.text();
+      const data = JSON.parse(text)
+   
+
+    if(
+      !Array.isArray(data.previousDays) ||
+      !Array.isArray(data.previousPayments)
+    ){
+      throw new Error('file must contain previousPayments and previousTransactions arrays')
+    }
+
+    console.log(`${file.name} loaded`)
+
+    return new pendingTransactionsStore(fileHandle, data)
+  } catch (error){
+    throw new  Error(`could not loa pending transactions: ${error.message}`)
+  }
+  }
+
+  getPayment(){
+    return structuredClone(this.#data.previousPayments)
+  }
+
+  getPostings(){
+    return structuredClone(this.#data.previousPostings)
+  }
+
+  update(result){
+    this.#data.previousPayments = [...result.unmatchingPayments]
+    this.#data.previousPostings = [...result.unmatchingJournal]
+  }
+
+  removePayment(index){
+    this.#ValidateIndex(index, this.#data.previousPayments, 'payment')
+
+    const [payment] = this.#data.previousPayments.splice(index,1)
+    this.#deletedTransactions.payments.push(payment)
+
+    return payment
+  }
+
+  removePosting(index){
+    this.#ValidateIndex(index, this.#data.previousPostings, 'posting')
+
+    const [posting] = this.#data.previousPostings.splice(index,1)
+    this.#deletedTransactions.push(posting)
+
+    return posting
+  }
+
+  async save(){
+    const permission = this.#fileHandle.requestPermission({
+      mode: 'readwrite'
+    })
+    if(permission !== 'granted'){
+      throw new Error('write permission was denied')
+    }
+
+    const writable = await this.#fileHandle.createWritable()
+
+    try{
+       await writable.write(
+        JSON.stringify(this.#data, null , 2)
+      )
+    } finally{
+      await writable.close()
+    }
+    console.log(`${this.#fileHandle.name} updated`)
+  }
+
+  async backUp(){
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-");
+
+      const backUpHandle = await window.showSaveFilePicker({
+        suggestedName:`pending-transactions-backup-${timestamp}.json`,
+        types: [
+          {
+            description: 'JSON file',
+            accept: {
+              "application/json": [".json"],
+            }
+          }
+        ]
+      })
+
+      const writable = await backUpHandle.createWritable()
+
+      try{
+        await writable.write(
+          JSON.stringify(this.#data, null, 2)
+        )
+      } finally{
+        await writable.close()
+      }
+      console.log(`${backUpHandle.name} backed up`)
+  } 
+}
 class Workbook {
   #data;
   #sheet;
-  static previousDays;
-  static deletedTransactions = {
-    payments: [],
-    postings: [],
-  };
-  static previousDaysFileHandle;
-  static async loadPreviousDays(file) {
-    if (!file) {
-      throw new Error("please select a JSON file");
-    }
-    let data;
-    try {
-      const read = await file.getFile();
-      const text = await read.text();
-      data = await JSON.parse(text);
-    } catch (e) {
-      throw new Error(`couldn't read the file's content: ${e.message}`);
-    }
-
-    if (
-      !Array.isArray(data.previousPayments) ||
-      !Array.isArray(data.previousPostings)
-    ) {
-      throw new Error("the file must contain previous transactions arrays");
-    }
-    Workbook.previousDaysFileHandle = file;
-    Workbook.previousDays = data;
-    console.log(`${file.name} loaded`);
-  }
-
   constructor(data) {
     this.#data = data;
   }
@@ -274,136 +374,28 @@ class Workbook {
     console.log(reconResult);
     return reconResult;
   }
-
-  static async saveData(pending) {
-    const fileHandle = Workbook.previousDaysFileHandle;
-    if (!fileHandle) {
-      throw new Error("No previously loaded file is avaliable");
-    }
-    if (
-      !pending ||
-      !Array.isArray(pending.unmatchingJournal) ||
-      !Array.isArray(pending.unmatchingPayments)
-    ) {
-      throw new Error("Invalid pending transaction data");
-    }
-
-    const permission = await fileHandle.requestPermission({
-      mode: "readwrite",
-    });
-
-    if (permission !== "granted") {
-      throw new Error("write permission was not granted");
-    }
-
-    const pastTransactions = {
-      previousPostings: pending.unmatchingJournal,
-      previousPayments: pending.unmatchingPayments,
-    };
-
-    const writable = await fileHandle.createWritable();
-    try {
-      await writable.write(JSON.stringify(pastTransactions, null, 2));
-    } finally {
-      await writable.close();
-    }
-    console.log(`${fileHandle.name} saved`);
-  }
-
-  static async backupData(pending) {
-    if (
-      !pending ||
-      !Array.isArray(pending.unmatchingJournal) ||
-      !Array.isArray(pending.unmatchingPayments)
-    ) {
-      throw new Error("Invalid pending transaction data");
-    }
-    const backupData = {
-      previousPostings: pending.unmatchingJournal,
-      previousPayments: pending.unmatchingPayments,
-    };
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    let backupHandle;
-    try {
-      backupHandle = await window.showSaveFilePicker({
-        suggestedName: `pending-transactions-backup-${timestamp}.json`,
-        types: [
-          {
-            description: "JSON file",
-            accept: {
-              "application/json": [".json"],
-            },
-          },
-        ],
-      });
-    } catch (error) {
-      throw new Error(`Could not select a backup file: ${error.message}`);
-    }
-
-    const writable = await backupHandle.createWritable();
-
-    try {
-      await writable.write(JSON.stringify(backupData, null, 2));
-    } catch {
-      throw new Error(`couldnt create a backup file`);
-    } finally {
-      await writable.close();
-    }
-    console.log(`${backupHandle.name} backed up`);
-    return true;
-  }
-
-  static removePosting(transactionIndex) {
-    if (!Workbook.previousDays) {
-      throw new Error("Previous transaction data has not been loaded");
-    }
-
-    const unmatched = this.previousDays.previousPostings;
-
-    if (
-      !Number.isInteger(transactionIndex) ||
-      transactionIndex < 0 ||
-      transactionIndex >= unmatched.length
-    ) {
-      throw new Error(`Invalid posting index: ${transactionIndex}`);
-    }
-
-    const [removedPosting] = unmatched.splice(transactionIndex, 1);
-    Workbook.deletedTransactions.postings.push(removedPosting);
-  }
-
-  static removePayment(paymentIndex) {
-    if (!Workbook.previousDays) {
-      throw new Error("Previous transaction data has not been loaded");
-    }
-    const unmatched = this.previousDays.previousPayments;
-    if (
-      !Number.isInteger(paymentIndex) ||
-      paymentIndex < 0 ||
-      paymentIndex >= unmatched.length
-    ) {
-      throw new Error(`Invalid payment index: ${paymentIndex}`);
-    }
-  const [removedPayment] = unmatched.splice(paymentIndex, 1)
-  Workbook.deletedTransactions.payments.push(removedPayment);
-  }
 }
-
 async function call() {
   const Journal = await Workbook.create("./excel/Journal.xlsx");
   const Merchant = await Workbook.create("./excel/Merchant September.xlsx");
   Journal.getReconSheet();
   Merchant.getReconSheet();
 
-  Workbook.performRecon(Journal, Merchant, 46269, CARD_SCHEMES.VISA);
-  Workbook.performRecon(Journal, Merchant, 46270, CARD_SCHEMES.VISA);
-  Workbook.performRecon(Journal, Merchant, 46271, CARD_SCHEMES.VISA);
-  Workbook.performRecon(Journal, Merchant, 46272, CARD_SCHEMES.VISA);
-  Workbook.performRecon(Journal, Merchant, 46273, CARD_SCHEMES.VISA);
-  Workbook.performRecon(Journal, Merchant, 46274, CARD_SCHEMES.VISA);
-  Workbook.performRecon(Journal, Merchant, 46275, CARD_SCHEMES.VISA);
-  Workbook.performRecon(Journal, Merchant, 46276, CARD_SCHEMES.VISA);
+  const dates = [
+    46269,
+    46270,
+    46271,
+    46272,
+    46273,
+    46274,
+    46275,
+    46276
+  ]
+
+  dates.forEach(day =>{
+    Workbook.performRecon(Journal, Merchant, day, CARD_SCHEMES.VISA)
+  })
+
   Workbook.removePosting(9);
   Workbook.removePosting(8);
   Workbook.removePosting(7);
@@ -416,7 +408,6 @@ async function call() {
 
   Workbook.removePayment(8);
   Workbook.removePayment(7);
-
   Workbook.performRecon(Journal, Merchant, 46277, CARD_SCHEMES.VISA);
   const result = Workbook.performRecon(
     Journal,
