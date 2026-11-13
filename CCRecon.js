@@ -119,13 +119,13 @@ class pendingTransactionsStore{
     }
 
     try{
-      const file = fileHandle.getFile();
-      const text = file.text();
-      const data = JSON.parse(text)
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      const data = await JSON.parse(text)
    
 
     if(
-      !Array.isArray(data.previousDays) ||
+      !Array.isArray(data.previousPostings) ||
       !Array.isArray(data.previousPayments)
     ){
       throw new Error('file must contain previousPayments and previousTransactions arrays')
@@ -135,11 +135,11 @@ class pendingTransactionsStore{
 
     return new pendingTransactionsStore(fileHandle, data)
   } catch (error){
-    throw new  Error(`could not loa pending transactions: ${error.message}`)
+    throw new  Error(`couldn't load pending transactions: ${error.message}`)
   }
   }
 
-  getPayment(){
+  getPayments(){
     return structuredClone(this.#data.previousPayments)
   }
 
@@ -165,7 +165,7 @@ class pendingTransactionsStore{
     this.#ValidateIndex(index, this.#data.previousPostings, 'posting')
 
     const [posting] = this.#data.previousPostings.splice(index,1)
-    this.#deletedTransactions.push(posting)
+    this.#deletedTransactions.postings.push(posting)
 
     return posting
   }
@@ -247,7 +247,7 @@ class Workbook {
 
     const data = await XLSX.read(AB);
     if (!data) {
-      throw new Error("something went wrong, could not read workbook data");
+      throw new Error("could not read workbook data");
     }
 
     return new Workbook(data);
@@ -259,6 +259,7 @@ class Workbook {
     const firstSheetName = this.#data.SheetNames[0];
     const worksheet = this.#data.Sheets[firstSheetName];
     this.#sheet = XLSX.utils.sheet_to_json(worksheet);
+    console.log(this.#sheet)
   }
   getRows() {
     if (!this.#sheet) {
@@ -282,7 +283,7 @@ class Workbook {
       (requestedDay) => requestedDay["Posting Date DD:MM:YYYY"] == paymentDate,
     );
     if (selectedPaymentDate.length === 0) {
-      throw new Error(`could not get date: ${selectedPaymentDate}`);
+      throw new Error(`could not get date: ${paymentDate}`);
     }
     const posPaymentsForScheme = selectedPaymentDate.filter((card) =>
       includesText(card["Card Type"], cardScheme),
@@ -333,54 +334,84 @@ class Workbook {
           toDateKey(microsPostingDate),
       )
       .filter((transaction) =>
-        transaction["TRX_DESC"]?.toUpperCase().includes("POS"),
+        includesText(transaction["TRX_DESC"], "POS"),
       );
 
-    return { Manual, Micros, POSPayments };
-  }
-
-  static performRecon(
-    journalInstance,
-    merchantInstance,
-    paymentDate,
-    cardScheme,
-  ) {
-    const reconData = this.getTransactions(
-      journalInstance,
-      merchantInstance,
-      paymentDate,
-      cardScheme,
-    );
-    if (!reconData) {
-      throw new Error(`couldnt get Recon data`);
-    }
-    if (!this.previousDays) {
-      throw new Error("Previous transaction data has not been loaded");
-    }
-    const allPayments = [
-      ...this.previousDays.previousPayments,
-      ...reconData.POSPayments,
-    ];
-    const currentPostings = [...reconData.Manual, ...reconData.Micros];
-
-    const reconJournal = [
-      ...removeCorrections(currentPostings),
-      ...this.previousDays.previousPostings,
-    ];
-
-    const reconResult = matchTransactions(reconJournal, allPayments);
-    this.previousDays.previousPayments = [...reconResult.unmatchingPayments];
-    this.previousDays.previousPostings = [...reconResult.unmatchingJournal];
-    console.log(reconResult);
-    return reconResult;
+    return { Manual, Micros, POSPayments, paymentDate };
   }
 }
-async function call() {
+
+class ReconciliationSession{
+  #journal
+  #merchant
+  #store
+  #cardScheme
+
+  constructor(journal,merchant,store,cardScheme){
+    this.#journal = journal
+    this.#merchant = merchant
+    this.#store = store
+    this.#cardScheme = cardScheme
+  }
+
+  static async open(journal,merchant,fileHandle,cardScheme){
+    const store = await pendingTransactionsStore.load(fileHandle)
+    
+    return new ReconciliationSession(journal,merchant,store,cardScheme)
+  }
+
+  perform(paymentDate){
+    const reconData = Workbook.getTransactions(
+      this.#journal,
+      this.#merchant,
+      paymentDate,
+      this.#cardScheme,)
+  
+    if(!reconData){
+      throw new Error('Could not get reconciliation data')
+    }
+
+    const allPayments = [...this.#store.getPayments(), ...reconData.POSPayments]
+
+    const currentPostings = [...reconData.Manual, ...reconData.Micros]
+
+    const reconJournal = [...removeCorrections(currentPostings), ...this.#store.getPostings()]
+
+    const result = matchTransactions(reconJournal, allPayments)
+
+    this.#store.update(result)
+    console.log(result)
+    return result
+  }
+
+ removePosting(index){
+  return this.#store.removePosting(index)
+ }
+
+ removePayment(index){
+  return this.#store.removePayment(index)
+ }
+ save(){
+  return this.#store.save()
+ }
+
+ backup(){
+  return this.#store.backUp()
+ }
+}
+async function call(fileHandle) {
   const Journal = await Workbook.create("./excel/Journal.xlsx");
   const Merchant = await Workbook.create("./excel/Merchant September.xlsx");
   Journal.getReconSheet();
   Merchant.getReconSheet();
 
+
+  const visaSession = await ReconciliationSession.open(
+    Journal,
+    Merchant,
+    fileHandle,
+    CARD_SCHEMES.VISA
+  )
   const dates = [
     46269,
     46270,
@@ -393,31 +424,26 @@ async function call() {
   ]
 
   dates.forEach(day =>{
-    Workbook.performRecon(Journal, Merchant, day, CARD_SCHEMES.VISA)
+    visaSession.perform(day)
   })
 
-  Workbook.removePosting(9);
-  Workbook.removePosting(8);
-  Workbook.removePosting(7);
-  Workbook.removePosting(6);
-  Workbook.removePosting(5);
-  Workbook.removePosting(4);
-  Workbook.removePosting(3);
-  Workbook.removePosting(2);
-  Workbook.removePosting(0);
+  visaSession.removePosting(9);
+  visaSession.removePosting(8);
+  visaSession.removePosting(7);
+  visaSession.removePosting(6);
+  visaSession.removePosting(5);
+  visaSession.removePosting(4);
+  visaSession.removePosting(3);
+  visaSession.removePosting(2);
+  visaSession.removePosting(0);
 
-  Workbook.removePayment(8);
-  Workbook.removePayment(7);
-  Workbook.performRecon(Journal, Merchant, 46277, CARD_SCHEMES.VISA);
-  const result = Workbook.performRecon(
-    Journal,
-    Merchant,
-    46278,
-    CARD_SCHEMES.VISA,
-  );
-  const dataBackedUp = await Workbook.backupData(result);
-  if (dataBackedUp) {
-    await Workbook.saveData(result);
+  visaSession.removePayment(8);
+  visaSession.removePayment(7);
+  visaSession.perform(46277);
+  visaSession.perform(46278);
+  const BackedUp = await visaSession.backup();
+  if (BackedUp) {
+    await visaSession.save();
   }
 }
 
@@ -440,8 +466,7 @@ document.addEventListener("click", async (e) => {
           },
         ],
       });
-      await Workbook.loadPreviousDays(handle);
-      await call();
+      await call(handle);
     } catch (error) {
       console.error(error.message);
     }
