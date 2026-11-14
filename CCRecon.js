@@ -31,6 +31,34 @@ function toDateKey(value) {
   ].join("-");
 }
 
+function compareAmounts(a, b) {
+  return (a.payment["Transaction Amount"] - b.payment["Transaction Amount"]);
+}
+
+function sort(result) {
+  const matched = result.matchingTransactions;
+  return [...matched].sort(compareAmounts);
+
+}
+
+
+function exportToExcel(result, date, cardScheme){
+  const sortedResult = sort(result)
+  const flattenedData = sortedResult.map(row => ({
+    Date: toDateKey(excelSerialToDate(row.payment['Transaction Date DD:MM:YYYY'])), 
+    Card_number: row.payment['Card Number'],
+    Authorization_Code: row.payment['Authorization Code'],
+    Channel: row.payment.Channel,
+    Payment_amount: row.payment['Transaction Amount'],
+    Posting_amount: row.revenue['PRINT_CASHIER_CREDIT'],
+    Variance: +row.revenue['PRINT_CASHIER_CREDIT'] - +row.payment['Transaction Amount']
+  }))
+  const workbook = XLSX.utils.book_new()
+  const worksheet = XLSX.utils.json_to_sheet(flattenedData)
+  XLSX.utils.book_append_sheet(workbook, worksheet, toDateKey(excelSerialToDate(date)))
+  XLSX.writeFile(workbook, `CC Recon: ${cardScheme}.xlsx`)
+}
+
 const CARD_SCHEMES = {
   VISA: "visa",
   MASTER: "master",
@@ -89,135 +117,126 @@ function matchTransactions(postings, payments) {
   };
 }
 
-class pendingTransactionsStore{
+class pendingTransactionsStore {
   #fileHandle;
   #data;
   #deletedTransactions = {
     payments: [],
-    postings: []
-  }
-  #ValidateIndex(index, items, itemType){
-   if(
-    !Number.isInteger(index) ||
-    index < 0 ||
-    index >= items.length
-   ){
-    throw new Error(`invalid ${itemType}, index: ${index}`)
-   }
+    postings: [],
+  };
+  #ValidateIndex(index, items, itemType) {
+    if (!Number.isInteger(index) || index < 0 || index >= items.length) {
+      throw new Error(`invalid ${itemType}, index: ${index}`);
+    }
   }
 
-  constructor(fileHandle, data){
-    this.#fileHandle = fileHandle
+  constructor(fileHandle, data) {
+    this.#fileHandle = fileHandle;
     this.#data = {
       previousPayments: [...data.previousPayments],
-      previousPostings: [...data.previousPostings]
-    }
+      previousPostings: [...data.previousPostings],
+    };
   }
-  static async load(fileHandle){
-    if(!fileHandle){
-      throw new Error('please Select a JSON file')
+  static async load(fileHandle) {
+    if (!fileHandle) {
+      throw new Error("please Select a JSON file");
     }
 
-    try{
+    try {
       const file = await fileHandle.getFile();
       const text = await file.text();
-      const data = await JSON.parse(text)
-   
+      const data = await JSON.parse(text);
 
-    if(
-      !Array.isArray(data.previousPostings) ||
-      !Array.isArray(data.previousPayments)
-    ){
-      throw new Error('file must contain previousPayments and previousTransactions arrays')
-    }
-
-    console.log(`${file.name} loaded`)
-
-    return new pendingTransactionsStore(fileHandle, data)
-  } catch (error){
-    throw new  Error(`couldn't load pending transactions: ${error.message}`)
-  }
-  }
-
-  getPayments(){
-    return structuredClone(this.#data.previousPayments)
-  }
-
-  getPostings(){
-    return structuredClone(this.#data.previousPostings)
-  }
-
-  update(result){
-    this.#data.previousPayments = [...result.unmatchingPayments]
-    this.#data.previousPostings = [...result.unmatchingJournal]
-  }
-
-  removePayment(index){
-    this.#ValidateIndex(index, this.#data.previousPayments, 'payment')
-
-    const [payment] = this.#data.previousPayments.splice(index,1)
-    this.#deletedTransactions.payments.push(payment)
-
-    return payment
-  }
-
-  removePosting(index){
-    this.#ValidateIndex(index, this.#data.previousPostings, 'posting')
-
-    const [posting] = this.#data.previousPostings.splice(index,1)
-    this.#deletedTransactions.postings.push(posting)
-
-    return posting
-  }
-
-  async save(){
-    const permission = this.#fileHandle.requestPermission({
-      mode: 'readwrite'
-    })
-    if(permission !== 'granted'){
-      throw new Error('write permission was denied')
-    }
-
-    const writable = await this.#fileHandle.createWritable()
-
-    try{
-       await writable.write(
-        JSON.stringify(this.#data, null , 2)
-      )
-    } finally{
-      await writable.close()
-    }
-    console.log(`${this.#fileHandle.name} updated`)
-  }
-
-  async backUp(){
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[:.]/g, "-");
-
-      const backUpHandle = await window.showSaveFilePicker({
-        suggestedName:`pending-transactions-backup-${timestamp}.json`,
-        types: [
-          {
-            description: 'JSON file',
-            accept: {
-              "application/json": [".json"],
-            }
-          }
-        ]
-      })
-
-      const writable = await backUpHandle.createWritable()
-
-      try{
-        await writable.write(
-          JSON.stringify(this.#data, null, 2)
-        )
-      } finally{
-        await writable.close()
+      if (
+        !Array.isArray(data.previousPostings) ||
+        !Array.isArray(data.previousPayments)
+      ) {
+        throw new Error(
+          "file must contain previousPayments and previousTransactions arrays",
+        );
       }
-      console.log(`${backUpHandle.name} backed up`)
-  } 
+
+      console.log(`${file.name} loaded`);
+
+      return new pendingTransactionsStore(fileHandle, data);
+    } catch (error) {
+      throw new Error(`couldn't load pending transactions: ${error.message}`);
+    }
+  }
+
+  getPayments() {
+    return structuredClone(this.#data.previousPayments);
+  }
+
+  getPostings() {
+    return structuredClone(this.#data.previousPostings);
+  }
+
+  update(result) {
+    this.#data.previousPayments = [...result.unmatchingPayments];
+    this.#data.previousPostings = [...result.unmatchingJournal];
+  }
+
+  removePayment(index) {
+    this.#ValidateIndex(index, this.#data.previousPayments, "payment");
+
+    const [payment] = this.#data.previousPayments.splice(index, 1);
+    this.#deletedTransactions.payments.push(payment);
+
+    return payment;
+  }
+
+  removePosting(index) {
+    this.#ValidateIndex(index, this.#data.previousPostings, "posting");
+
+    const [posting] = this.#data.previousPostings.splice(index, 1);
+    this.#deletedTransactions.postings.push(posting);
+
+    return posting;
+  }
+
+  async save() {
+    const permission = this.#fileHandle.requestPermission({
+      mode: "readwrite",
+    });
+    if (permission !== "granted") {
+      throw new Error("write permission was denied");
+    }
+
+    const writable = await this.#fileHandle.createWritable();
+
+    try {
+      await writable.write(JSON.stringify(this.#data, null, 2));
+    } finally {
+      await writable.close();
+    }
+    console.log(`${this.#fileHandle.name} updated`);
+  }
+
+  async backUp() {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+    const backUpHandle = await window.showSaveFilePicker({
+      suggestedName: `pending-transactions-backup-${timestamp}.json`,
+      types: [
+        {
+          description: "JSON file",
+          accept: {
+            "application/json": [".json"],
+          },
+        },
+      ],
+    });
+
+    const writable = await backUpHandle.createWritable();
+
+    try {
+      await writable.write(JSON.stringify(this.#data, null, 2));
+    } finally {
+      await writable.close();
+    }
+    console.log(`${backUpHandle.name} backed up`);
+  }
 }
 class Workbook {
   #data;
@@ -259,7 +278,7 @@ class Workbook {
     const firstSheetName = this.#data.SheetNames[0];
     const worksheet = this.#data.Sheets[firstSheetName];
     this.#sheet = XLSX.utils.sheet_to_json(worksheet);
-    console.log(this.#sheet)
+    console.log(this.#sheet);
   }
   getRows() {
     if (!this.#sheet) {
@@ -333,71 +352,80 @@ class Workbook {
           toDateKey(POSPosting["BUSINESS_DATE"]) ==
           toDateKey(microsPostingDate),
       )
-      .filter((transaction) =>
-        includesText(transaction["TRX_DESC"], "POS"),
-      );
+      .filter((transaction) => includesText(transaction["TRX_DESC"], "POS"));
 
     return { Manual, Micros, POSPayments, paymentDate };
   }
 }
 
-class ReconciliationSession{
-  #journal
-  #merchant
-  #store
-  #cardScheme
+class ReconciliationSession {
+  #journal;
+  #merchant;
+  #store;
+  #cardScheme;
+  
 
-  constructor(journal,merchant,store,cardScheme){
-    this.#journal = journal
-    this.#merchant = merchant
-    this.#store = store
-    this.#cardScheme = cardScheme
+  constructor(journal, merchant, store, cardScheme) {
+    this.#journal = journal;
+    this.#merchant = merchant;
+    this.#store = store;
+    this.#cardScheme = cardScheme;
   }
 
-  static async open(journal,merchant,fileHandle,cardScheme){
-    const store = await pendingTransactionsStore.load(fileHandle)
-    
-    return new ReconciliationSession(journal,merchant,store,cardScheme)
+  static async open(journal, merchant, fileHandle, cardScheme) {
+    const store = await pendingTransactionsStore.load(fileHandle);
+
+    return new ReconciliationSession(journal, merchant, store, cardScheme);
   }
 
-  perform(paymentDate){
+  perform(paymentDate) {
     const reconData = Workbook.getTransactions(
       this.#journal,
       this.#merchant,
       paymentDate,
-      this.#cardScheme,)
-  
-    if(!reconData){
-      throw new Error('Could not get reconciliation data')
+      this.#cardScheme,
+    );
+
+    if (!reconData) {
+      throw new Error("Could not get reconciliation data");
     }
 
-    const allPayments = [...this.#store.getPayments(), ...reconData.POSPayments]
+    const allPayments = [
+      ...this.#store.getPayments(),
+      ...reconData.POSPayments,
+    ];
 
-    const currentPostings = [...reconData.Manual, ...reconData.Micros]
+    const currentPostings = [...reconData.Manual, ...reconData.Micros];
 
-    const reconJournal = [...removeCorrections(currentPostings), ...this.#store.getPostings()]
+    const reconJournal = [
+      ...removeCorrections(currentPostings),
+      ...this.#store.getPostings(),
+    ];
 
-    const result = matchTransactions(reconJournal, allPayments)
-
-    this.#store.update(result)
-    console.log(result)
-    return result
+    const result = matchTransactions(reconJournal, allPayments);
+    this.#store.update(result);
+    console.log(result);
+    return result;
   }
 
- removePosting(index){
-  return this.#store.removePosting(index)
- }
+  export(result, date){
+    return exportToExcel(result, date, this.#cardScheme)
+  }
 
- removePayment(index){
-  return this.#store.removePayment(index)
- }
- save(){
-  return this.#store.save()
- }
+  removePosting(index) {
+    return this.#store.removePosting(index);
+  }
 
- backup(){
-  return this.#store.backUp()
- }
+  removePayment(index) {
+    return this.#store.removePayment(index);
+  }
+  save() {
+    return this.#store.save();
+  }
+
+  backup() {
+    return this.#store.backUp();
+  }
 }
 async function call(fileHandle) {
   const Journal = await Workbook.create("./excel/Journal.xlsx");
@@ -405,27 +433,17 @@ async function call(fileHandle) {
   Journal.getReconSheet();
   Merchant.getReconSheet();
 
-
   const visaSession = await ReconciliationSession.open(
     Journal,
     Merchant,
     fileHandle,
-    CARD_SCHEMES.VISA
-  )
-  const dates = [
-    46269,
-    46270,
-    46271,
-    46272,
-    46273,
-    46274,
-    46275,
-    46276
-  ]
+    CARD_SCHEMES.VISA,
+  );
+  const dates = [46269, 46270, 46271, 46272, 46273, 46274, 46275, 46276];
 
-  dates.forEach(day =>{
-    visaSession.perform(day)
-  })
+  dates.forEach((day) => {
+    visaSession.perform(day);
+  });
 
   visaSession.removePosting(9);
   visaSession.removePosting(8);
@@ -440,7 +458,7 @@ async function call(fileHandle) {
   visaSession.removePayment(8);
   visaSession.removePayment(7);
   visaSession.perform(46277);
-  visaSession.perform(46278);
+   visaSession.export(visaSession.perform(46278),46278 ) ;
   const BackedUp = await visaSession.backup();
   if (BackedUp) {
     await visaSession.save();
