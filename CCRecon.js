@@ -31,33 +31,88 @@ function toDateKey(value) {
   ].join("-");
 }
 
-function compareAmounts(a, b) {
-  return (a.payment["Transaction Amount"] - b.payment["Transaction Amount"]);
+function compareMatchingAmounts(a, b) {
+  return a.payment["Transaction Amount"] - b.payment["Transaction Amount"];
 }
 
-function sort(result) {
-  const matched = result.matchingTransactions;
-  return [...matched].sort(compareAmounts);
-
+function comparePendingJournal(a, b) {
+  const dateOne = toDateKey(a.BUSINESS_DATE);
+  const dateTwo = toDateKey(b.BUSINESS_DATE);
+  return new Date(dateOne).getTime() - new Date(dateTwo).getTime();
 }
 
-
-function exportToExcel(result, date, cardScheme){
-  const sortedResult = sort(result)
-  const flattenedData = sortedResult.map(row => ({
-    Date: toDateKey(excelSerialToDate(row.payment['Transaction Date DD:MM:YYYY'])), 
-    Card_number: row.payment['Card Number'],
-    Authorization_Code: row.payment['Authorization Code'],
-    Channel: row.payment.Channel,
-    Payment_amount: row.payment['Transaction Amount'],
-    Posting_amount: row.revenue['PRINT_CASHIER_CREDIT'],
-    Variance: +row.revenue['PRINT_CASHIER_CREDIT'] - +row.payment['Transaction Amount']
-  }))
-  const workbook = XLSX.utils.book_new()
-  const worksheet = XLSX.utils.json_to_sheet(flattenedData)
-  XLSX.utils.book_append_sheet(workbook, worksheet, toDateKey(excelSerialToDate(date)))
-  XLSX.writeFile(workbook, `CC Recon: ${cardScheme}.xlsx`)
+function comparePendingPayments(a, b) {
+  const dateOne = toDateKey(
+    excelSerialToDate(a["Transaction Date DD:MM:YYYY"]),
+  );
+  const dateTwo = toDateKey(
+    excelSerialToDate(b["Transaction Date DD:MM:YYYY"]),
+  );
+  return new Date(dateOne).getTime() - new Date(dateTwo).getTime();
 }
+
+function sortMatching(matched) {
+  return matched.sort(compareMatchingAmounts);
+}
+
+function sortPendingJournal(unmatchingJournal) {
+  return unmatchingJournal.sort(comparePendingJournal);
+}
+function sortPendingPayments(unmatchingPayments) {
+  return unmatchingPayments.sort(comparePendingPayments);
+}
+
+// function exportToExcel(result, date, cardScheme) {
+//   const workbook = XLSX.utils.book_new();
+//   const sortedResult = sortMatching(result);
+
+//   const flattenedMatching = sortedResult.map((row) => ({
+//     Date: toDateKey(
+//       excelSerialToDate(row.payment["Transaction Date DD:MM:YYYY"]),
+//     ),
+//     Card_number: row.payment["Card Number"],
+//     Authorization_Code: row.payment["Authorization Code"],
+//     Channel: row.payment.Channel,
+//     Payment_amount: row.payment["Transaction Amount"],
+//     Posting_amount: row.revenue["PRINT_CASHIER_CREDIT"],
+//     Variance:
+//       +row.revenue["PRINT_CASHIER_CREDIT"] - +row.payment["Transaction Amount"],
+//   }));
+
+//   const flattenedUnmatchingPayments = result.unmatchingPayments.map((row) => ({
+//     paymentDate: toDateKey(
+//       excelSerialToDate(row["Transaction Date DD:MM:YYYY"]),
+//     ),
+//     Card_numberr: row["Card Number"],
+//     Authorization_Codee: row["Authorization Code"],
+//     Channell: row.Channel,
+//     Paymentt_amount: row["Transaction Amount"],
+//     "": "",
+//   }));
+
+//   const flattenedunmatchingRevenue = result.unmatchingJournal.map((row) => ({
+//     posted_on: row[["BUSINESS_DATE"]],
+//     posting: row["PRINT_CASHIER_CREDIT"],
+//   }));
+
+//   const flattenedData = [
+//     ...flattenedMatching,
+//     "",
+//     "",
+//     "",
+//     ...flattenedUnmatchingPayments,
+//     "",
+//     ...flattenedunmatchingRevenue,
+//   ];
+//   console.log(flattenedData);
+//   const worksheet = XLSX.utils.json_to_sheet(flattenedData);
+//   XLSX.utils.book_append_sheet(
+//     workbook,
+//     worksheet,
+//     toDateKey(excelSerialToDate(date)),
+//   );
+//   XLSX.writeFile(workbook, `CC Recon: ${cardScheme}.xlsx`);
+// }
 
 const CARD_SCHEMES = {
   VISA: "visa",
@@ -363,7 +418,6 @@ class ReconciliationSession {
   #merchant;
   #store;
   #cardScheme;
-  
 
   constructor(journal, merchant, store, cardScheme) {
     this.#journal = journal;
@@ -408,9 +462,9 @@ class ReconciliationSession {
     return result;
   }
 
-  export(result, date){
-    return exportToExcel(result, date, this.#cardScheme)
-  }
+  // export(result, date) {
+  //   return exportToExcel(result, date, this.#cardScheme);
+  // }
 
   removePosting(index) {
     return this.#store.removePosting(index);
@@ -426,44 +480,152 @@ class ReconciliationSession {
   backup() {
     return this.#store.backUp();
   }
+  getSessionType() {
+    return this.#cardScheme;
+  }
 }
-async function call(fileHandle) {
+
+class ExcelExporter {
+  #fileHandle;
+  #resultWorkbook;
+  #cardScheme;
+
+  constructor(fileHandle, resultWorkbook, cardScheme) {
+    this.#fileHandle = fileHandle;
+    this.#resultWorkbook = resultWorkbook;
+    this.#cardScheme = cardScheme;
+  }
+
+  static async open(fileHandle, cardScheme) {
+    if (!fileHandle) {
+      throw new Error("please select a book to save the results");
+    }
+
+    try {
+      const file = await fileHandle.getFile();
+      const arrayBuffer = await file.arrayBuffer(file);
+      const workBook = await XLSX.read(arrayBuffer);
+      return new ExcelExporter(fileHandle, workBook, cardScheme);
+    } catch (error) {
+      ("could not read the results workbook");
+    }
+  }
+
+  appendResult(result, date) {
+    const sortedMatching = sortMatching(result.matchingTransactions);
+    const sortedPendingJournal = sortPendingJournal(result.unmatchingJournal);
+    const sortedPendingPayment = sortPendingPayments(result.unmatchingPayments);
+
+    const matchingRows = sortedMatching.map((row) => ({
+      payment_date: toDateKey(
+        excelSerialToDate(row.payment["Transaction Date DD:MM:YYYY"]),
+      ),
+      card: row.payment["Card Number"],
+      payment_Channel: row.payment.Channel,
+      payment_amount: row.payment["Transaction Amount"],
+      posting_amount: row.revenue["PRINT_CASHIER_CREDIT"],
+      variance:
+        +row.revenue["PRINT_CASHIER_CREDIT"] -
+        +row.payment["Transaction Amount"],
+    }));
+
+    const unmatchedPaymentRows = sortedPendingPayment.map((row) => ({
+      date: toDateKey(excelSerialToDate(row["Transaction Date DD:MM:YYYY"])),
+      card_number: row["Card Number"],
+      Authorization_Code: row["Authorization Code"],
+      Channel: row.Channel,
+      Payment_amount: +row["Transaction Amount"],
+    }));
+
+    const unmatchedJournalRows = sortPendingJournal.map((row) => ({
+      Room: row.ROOM ?? "No room was assigned",
+      Posted_on: row["BUSINESS_DATE"],
+      Posting: +row["PRINT_CASHIER_CREDIT"],
+    }));
+
+    const maxRowCount = Math.max(
+      matchingRows.length,
+      unmatchedJournalRows.length,
+      unmatchedPaymentRows.length,
+    );
+
+    const rows = Array.from({ length: maxRowCount }, (_, index) => ({
+      ...(matchingRows ?? {}),
+      ...(unmatchedJournalRows ?? {}),
+      ...(unmatchedPaymentRows ?? {}),
+    }));
+
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    const sheetName = toDateKey(excelSerialToDate(date));
+
+    XLSX.utils.book_append_sheet(this.#resultWorkbook, sheet, sheetName);
+  }
+
+  async save() {
+    const permission = await this.#fileHandle.requestPermission({
+      mode: readwrite,
+    });
+    if (!permission) {
+      throw new Error("write permission was denied");
+    }
+
+    const output = XLSX.write(this.#resultWorkbook, {
+      bookType: xlsx,
+      type: array,
+    });
+
+    const writable = await this.#fileHandle.createWritable();
+
+    try {
+      await writable.write(output);
+    } finally {
+      await writable.close();
+    }
+  }
+}
+
+async function getWorkBooks() {
   const Journal = await Workbook.create("./excel/Journal.xlsx");
   const Merchant = await Workbook.create("./excel/Merchant September.xlsx");
   Journal.getReconSheet();
   Merchant.getReconSheet();
+  return { Journal, Merchant };
+}
 
-  const visaSession = await ReconciliationSession.open(
-    Journal,
-    Merchant,
+async function openSession(fileHandle, data) {
+  if (!data) {
+    throw new Error("Could not read workbook");
+  }
+  return await ReconciliationSession.open(
+    data.Journal,
+    data.Merchant,
     fileHandle,
     CARD_SCHEMES.VISA,
   );
-  const dates = [46269, 46270, 46271, 46272, 46273, 46274, 46275, 46276];
-
-  dates.forEach((day) => {
-    visaSession.perform(day);
-  });
-
-  visaSession.removePosting(9);
-  visaSession.removePosting(8);
-  visaSession.removePosting(7);
-  visaSession.removePosting(6);
-  visaSession.removePosting(5);
-  visaSession.removePosting(4);
-  visaSession.removePosting(3);
-  visaSession.removePosting(2);
-  visaSession.removePosting(0);
-
-  visaSession.removePayment(8);
-  visaSession.removePayment(7);
-  visaSession.perform(46277);
-   visaSession.export(visaSession.perform(46278),46278 ) ;
-  const BackedUp = await visaSession.backup();
-  if (BackedUp) {
-    await visaSession.save();
-  }
 }
+// async function call(date) {
+
+//   visaSession.removePosting(9);
+//   visaSession.removePosting(8);
+//   visaSession.removePosting(7);
+//   visaSession.removePosting(6);
+//   visaSession.removePosting(5);
+//   visaSession.removePosting(4);
+//   visaSession.removePosting(3);
+//   visaSession.removePosting(2);
+//   visaSession.removePosting(0);
+//   visaSession.removePayment(8);
+//   visaSession.removePayment(7);
+//   const BackedUp = await visaSession.backup();
+//   if (BackedUp) {
+//     await visaSession.save();
+//   }
+// }
+
+  let workBook;
+  let currentSessionStore;
+  let currentSessionType = "visa";
+  let result;
 
 document.addEventListener("click", async (e) => {
   const target = e.target;
@@ -484,19 +646,36 @@ document.addEventListener("click", async (e) => {
           },
         ],
       });
-      await call(handle);
+      currentSessionStore = await openSession(handle, workBook);
     } catch (error) {
       console.error(error.message);
     }
   }
+  const uploadWorkSheets = target.closest('[data-selection="work-book"]');
+
+  if (uploadWorkSheets) {
+    workBook = await getWorkBooks();
+    console.log("workbooks uploaded");
+  }
+
+  const reconcile = target.closest('[data-reconcile="start"]');
+
+  if (reconcile) {
+    const dates = [
+      46269, 46270, 46271, 46272, 46273, 46274, 46275, 46276, 46277, 46278,
+    ];
+    result =  dates.map(date => currentSessionStore.perform(date)) ;
+    console.log("Reconcilliation done. Result:")
+    console.log(result)
+    
+    
+  }
+
+
+  // const downloadResult = target.closest('[data-download="results"]')
+
+  // if(downloadResult){
+
+  // }
+
 });
-
-// document.addEventListener('click', e =>{
-// const target = e.target
-
-// const pastButton = target.closest('[data-button="past-transactions"]')
-// if(pastButton){
-//   DOM.pastTransactionsBtn.click()
-// }
-
-// })
