@@ -3,6 +3,19 @@
 const DOM = {
   pastTransactionsBtn: document.getElementById("previousDataFile"),
 };
+
+const CARD_SCHEMES = {
+  VISA: "visa",
+  MASTER: "master",
+  MADA: "mada",
+};
+let appState = {
+  workBook: null,
+  sessionStore: null,
+  results: [],
+  sessionType: CARD_SCHEMES.VISA,
+  resultsWorkBook: null,
+};
 function includesText(value, text) {
   return (value ?? "").toUpperCase().includes(text.toUpperCase());
 }
@@ -113,12 +126,6 @@ function sortPendingPayments(unmatchingPayments) {
 //   );
 //   XLSX.writeFile(workbook, `CC Recon: ${cardScheme}.xlsx`);
 // }
-
-const CARD_SCHEMES = {
-  VISA: "visa",
-  MASTER: "master",
-  MADA: "mada",
-};
 
 function removeCorrections(postings) {
   const correctionIndex = new Set();
@@ -251,7 +258,7 @@ class pendingTransactionsStore {
   }
 
   async save() {
-    const permission = this.#fileHandle.requestPermission({
+    const permission = await this.#fileHandle.requestPermission({
       mode: "readwrite",
     });
     if (permission !== "granted") {
@@ -457,14 +464,11 @@ class ReconciliationSession {
     ];
 
     const result = matchTransactions(reconJournal, allPayments);
+
     this.#store.update(result);
     console.log(result);
     return result;
   }
-
-  // export(result, date) {
-  //   return exportToExcel(result, date, this.#cardScheme);
-  // }
 
   removePosting(index) {
     return this.#store.removePosting(index);
@@ -537,7 +541,7 @@ class ExcelExporter {
       Payment_amount: +row["Transaction Amount"],
     }));
 
-    const unmatchedJournalRows = sortPendingJournal.map((row) => ({
+    const unmatchedJournalRows = sortedPendingJournal.map((row) => ({
       Room: row.ROOM ?? "No room was assigned",
       Posted_on: row["BUSINESS_DATE"],
       Posting: +row["PRINT_CASHIER_CREDIT"],
@@ -550,9 +554,9 @@ class ExcelExporter {
     );
 
     const rows = Array.from({ length: maxRowCount }, (_, index) => ({
-      ...(matchingRows ?? {}),
-      ...(unmatchedJournalRows ?? {}),
-      ...(unmatchedPaymentRows ?? {}),
+      ...(matchingRows[index] ?? {}),
+      ...(unmatchedJournalRows[index] ?? {}),
+      ...(unmatchedPaymentRows[index] ?? {}),
     }));
 
     const sheet = XLSX.utils.json_to_sheet(rows);
@@ -562,16 +566,19 @@ class ExcelExporter {
   }
 
   async save() {
+    if(!this.#resultWorkbook){
+      throw new Error('could not read the results workbook')
+    }
     const permission = await this.#fileHandle.requestPermission({
-      mode: readwrite,
+      mode: 'readwrite',
     });
     if (!permission) {
       throw new Error("write permission was denied");
     }
 
     const output = XLSX.write(this.#resultWorkbook, {
-      bookType: xlsx,
-      type: array,
+      bookType: "xlsx",
+      type: "array",
     });
 
     const writable = await this.#fileHandle.createWritable();
@@ -603,37 +610,14 @@ async function openSession(fileHandle, data) {
     CARD_SCHEMES.VISA,
   );
 }
-// async function call(date) {
-
-//   visaSession.removePosting(9);
-//   visaSession.removePosting(8);
-//   visaSession.removePosting(7);
-//   visaSession.removePosting(6);
-//   visaSession.removePosting(5);
-//   visaSession.removePosting(4);
-//   visaSession.removePosting(3);
-//   visaSession.removePosting(2);
-//   visaSession.removePosting(0);
-//   visaSession.removePayment(8);
-//   visaSession.removePayment(7);
-//   const BackedUp = await visaSession.backup();
-//   if (BackedUp) {
-//     await visaSession.save();
-//   }
-// }
-
-  let workBook;
-  let currentSessionStore;
-  let currentSessionType = "visa";
-  let result;
 
 document.addEventListener("click", async (e) => {
   const target = e.target;
 
-  const pastTransactions = target.closest(
+  const uploadPendingButton = target.closest(
     '[data-selection="pending-transactions"]',
   );
-  if (pastTransactions) {
+  if (uploadPendingButton) {
     try {
       const [handle] = await window.showOpenFilePicker({
         multiple: false,
@@ -646,36 +630,76 @@ document.addEventListener("click", async (e) => {
           },
         ],
       });
-      currentSessionStore = await openSession(handle, workBook);
+      appState.sessionStore = await openSession(handle, appState.workBook);
     } catch (error) {
       console.error(error.message);
     }
   }
-  const uploadWorkSheets = target.closest('[data-selection="work-book"]');
+  const uploadWorkBookButton = target.closest('[data-selection="work-book"]');
 
-  if (uploadWorkSheets) {
-    workBook = await getWorkBooks();
+  if (uploadWorkBookButton) {
+    appState.workBook = await getWorkBooks();
     console.log("workbooks uploaded");
   }
 
   const reconcile = target.closest('[data-reconcile="start"]');
 
   if (reconcile) {
+    if (!appState.sessionStore || !appState.workBook) {
+      throw new Error("please upload all files");
+    }
     const dates = [
       46269, 46270, 46271, 46272, 46273, 46274, 46275, 46276, 46277, 46278,
     ];
-    result =  dates.map(date => currentSessionStore.perform(date)) ;
-    console.log("Reconcilliation done. Result:")
-    console.log(result)
-    
-    
+    dates.forEach((date) => {
+      appState.results = appState.sessionStore.perform(date);
+      appState.resultsWorkBook.appendResult(appState.results, date);
+      console.log("Reconcilliation done. Result:");
+      console.log(appState.results);
+    });
   }
 
+  const downloadResultButton = target.closest('[data-download="results"]');
+
+  if (downloadResultButton) {
+    appState.resultsWorkBook.save()
+  }
+
+  const uploadOutputButton = target.closest('[data-upload="output"]');
+
+  if (uploadOutputButton) {
+    try {
+      const [outputHandle] = await window.showOpenFilePicker({
+        multiple: false,
+        types: [
+          {
+            description: "Excel workbook",
+            accept: {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                [".xlsx"],
+              "application/vnd.ms-excel": [".xls"],
+              "application/vnd.ms-excel.sheet.macroEnabled.12": [".xlsm"],
+            },
+          },
+        ],
+      });
+
+      appState.resultsWorkBook = await ExcelExporter.open(
+        outputHandle,
+        appState.sessionType,
+      );
+
+      console.log("Results workbook uploaded");
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        console.error(error.message);
+      }
+    }
+  }
 
   // const downloadResult = target.closest('[data-download="results"]')
 
   // if(downloadResult){
 
   // }
-
 });
