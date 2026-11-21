@@ -545,6 +545,7 @@ class ExcelExporter {
       Room: row.ROOM ?? "No room was assigned",
       Posted_on: row["BUSINESS_DATE"],
       Posting: +row["PRINT_CASHIER_CREDIT"],
+      Refrence: row.REFERENCE
     }));
 
     const maxRowCount = Math.max(
