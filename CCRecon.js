@@ -542,10 +542,10 @@ class ExcelExporter {
     }));
 
     const unmatchedJournalRows = sortedPendingJournal.map((row) => ({
+      Reference: row.REFERENCE ?? 'no reference',
       Room: row.ROOM ?? "No room was assigned",
       Posted_on: row["BUSINESS_DATE"],
       Posting: +row["PRINT_CASHIER_CREDIT"],
-      Refrence: row.REFERENCE
     }));
 
     const maxRowCount = Math.max(
@@ -555,8 +555,10 @@ class ExcelExporter {
     );
 
     const rows = Array.from({ length: maxRowCount }, (_, index) => ({
-      ...(matchingRows[index] ?? {}),
+      ...(matchingRows[index] ?? {}), 
+      '-': '',
       ...(unmatchedJournalRows[index] ?? {}),
+      '.': '',
       ...(unmatchedPaymentRows[index] ?? {}),
     }));
 
