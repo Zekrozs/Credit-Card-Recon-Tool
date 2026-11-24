@@ -2,6 +2,8 @@
 
 const DOM = {
   pastTransactionsBtn: document.getElementById("previousDataFile"),
+  ReconDateDialog: document.getElementById("select-recon-date"),
+  dateListContainer: document.getElementById("list-container"),
 };
 
 const CARD_SCHEMES = {
@@ -62,6 +64,10 @@ function comparePendingPayments(a, b) {
     excelSerialToDate(b["Transaction Date DD:MM:YYYY"]),
   );
   return new Date(dateOne).getTime() - new Date(dateTwo).getTime();
+}
+
+function basicCompare(a, b) {
+  return a - b;
 }
 
 function sortMatching(matched) {
@@ -466,7 +472,6 @@ class ReconciliationSession {
     const result = matchTransactions(reconJournal, allPayments);
 
     this.#store.update(result);
-    console.log(result);
     return result;
   }
 
@@ -542,7 +547,7 @@ class ExcelExporter {
     }));
 
     const unmatchedJournalRows = sortedPendingJournal.map((row) => ({
-      Reference: row.REFERENCE ?? 'no reference',
+      Reference: row.REFERENCE ?? "no reference",
       Room: row.ROOM ?? "No room was assigned",
       Posted_on: row["BUSINESS_DATE"],
       Posting: +row["PRINT_CASHIER_CREDIT"],
@@ -555,10 +560,10 @@ class ExcelExporter {
     );
 
     const rows = Array.from({ length: maxRowCount }, (_, index) => ({
-      ...(matchingRows[index] ?? {}), 
-      '-': '',
+      ...(matchingRows[index] ?? {}),
+      "-": " ",
       ...(unmatchedJournalRows[index] ?? {}),
-      '.': '',
+      ".": " ",
       ...(unmatchedPaymentRows[index] ?? {}),
     }));
 
@@ -569,11 +574,11 @@ class ExcelExporter {
   }
 
   async save() {
-    if(!this.#resultWorkbook){
-      throw new Error('could not read the results workbook')
+    if (!this.#resultWorkbook) {
+      throw new Error("could not read the results workbook");
     }
     const permission = await this.#fileHandle.requestPermission({
-      mode: 'readwrite',
+      mode: "readwrite",
     });
     if (!permission) {
       throw new Error("write permission was denied");
@@ -642,30 +647,63 @@ document.addEventListener("click", async (e) => {
 
   if (uploadWorkBookButton) {
     appState.workBook = await getWorkBooks();
+    console.log(appState.workBook);
     console.log("workbooks uploaded");
   }
 
-  const reconcile = target.closest('[data-reconcile="start"]');
+  const selectDate = target.closest('[data-select="date"]');
 
-  if (reconcile) {
+  if (selectDate) {
     if (!appState.sessionStore || !appState.workBook) {
       throw new Error("please upload all files");
     }
-    const dates = [
-      46269, 46270, 46271, 46272, 46273, 46274, 46275, 46276, 46277, 46278,
-    ];
-    dates.forEach((date) => {
-      appState.results = appState.sessionStore.perform(date);
-      appState.resultsWorkBook.appendResult(appState.results, date);
-      console.log("Reconcilliation done. Result:");
-      console.log(appState.results);
+    const dateListNoDuplicates = new Set();
+    const avaliableDates = appState.workBook.Merchant.getRows();
+    avaliableDates.map((row) =>
+      dateListNoDuplicates.add(row["Posting Date DD:MM:YYYY"]),
+    );
+    const dateListSorted = Array.from(dateListNoDuplicates).sort(basicCompare);
+
+    dateListSorted.forEach((date) => {
+      const label = document.createElement("label");
+      label.textContent = toDateKey(excelSerialToDate(date));
+      const listItem = document.createElement("input");
+      listItem.type = "radio";
+      listItem.name = "listItemDate";
+      listItem.dataset.excelSerial = date;
+      label.appendChild(listItem);
+      DOM.dateListContainer.appendChild(label);
     });
+
+    DOM.ReconDateDialog.showModal();
+  }
+
+  const reconcileButton = target.closest('[data-action="confirm"]');
+  if (reconcileButton) {
+    // const dates = [
+    //   46269, 46270, 46271, 46272, 46273, 46274, 46275, 46276, 46277, 46278,
+    // ];
+    const checkedDate = document.querySelector(
+      'input[name="listItemDate"]:checked',
+    );
+    if (!checkedDate) {
+      throw new Error("Please select a reconciliation date");
+    }
+    appState.results = appState.sessionStore.perform(
+      checkedDate.dataset.excelSerial,
+    );
+    appState.resultsWorkBook.appendResult(
+      appState.results,
+      checkedDate.dataset.excelSerial
+    );
+    console.log("Reconcilliation done. Result:");
+    console.log(appState.results);
   }
 
   const downloadResultButton = target.closest('[data-download="results"]');
 
   if (downloadResultButton) {
-    appState.resultsWorkBook.save()
+    appState.resultsWorkBook.save();
   }
 
   const uploadOutputButton = target.closest('[data-upload="output"]');
@@ -700,9 +738,4 @@ document.addEventListener("click", async (e) => {
     }
   }
 
-  // const downloadResult = target.closest('[data-download="results"]')
-
-  // if(downloadResult){
-
-  // }
 });
