@@ -1,18 +1,29 @@
-<!DOCTYPE html>
-<html lang='en'>
-<head>
-    <meta charset='utf-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1'>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Absloute Zero</title>
     <!-- sheetjs library -->
-<script type="text/javascript" src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<script  src="CCRecon.js" defer></script>
-</head>
-<body>
-    <button id="upload-Pending" data-selection="pending-transactions" >upload pending transactions</button>
+    <script
+      type="text/javascript"
+      src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"
+    ></script>
+    <script src="CCRecon.js" defer></script>
+  </head>
+  <body>
+    <button id="upload-Pending" data-selection="pending-transactions">
+      upload pending transactions
+    </button>
     <button data-upload="output">Upload Output Workbook</button>
-    <button id = 'load-workbooks' data-selection="work-book">Upload Excel WorkBooks</button>
-    <button data-reconcile="start">Reconcile one day</button>
-    <button data-download=results>finish and download</button>
-</body>
+    <button id="load-workbooks" data-selection="work-book">
+      Upload Excel WorkBooks
+    </button>
+    <button data-select="date">Reconcile one day</button>
+    <button data-download="results">finish and download</button>
+  </body>
+  <dialog id="select-recon-date">
+    <div id="list-container"></div>
+    <button data-action="confirm">Confirm and Reconcile</button>
+  </dialog>
 </html>
